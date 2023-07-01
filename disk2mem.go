@@ -204,7 +204,7 @@ func (p *Haystack) getDisk2MemDictionary(content []byte, first_dictionary bool) 
 		return fmt.Errorf("read num dkeys %d > %d possible", read_num_dkeys, max_dkeys)
 	}
 
-	for i := 1; i < read_num_dkeys; i++ {
+	for i := 0; i < read_num_dkeys; i++ {
 		dkey, key := getKeyFromData(reader)
 
 		//fmt.Fprintf(os.Stderr, "dkey[%d]=%-10s\r", dkey, *key) // DEBUG
