@@ -184,9 +184,9 @@ func (p *Haybale) SortBale() {
 	runtime.ReadMemStats(&m)
 	oldalloc := m.HeapAlloc / (1024 * 1024)
 
-	// Sort: using build-in Go lib sorting function for now, with a closure.
+	// Sort: using standard Go lib sorting function for now, with a closure.
 	// If we used our own sorting function, we could take "self_ofs" out and save memory...
-	// (now it needs to be part of the same struct. Other optimisations may also be possible.
+	// (now it needs to be part of the same struct. Other optimisations may also be possible.)
 	sort.Slice(p.haystalk, func(p1, p2 int) bool {
 		return p.haystalk[p1].Compare(*p.haystalk[p2]) < 0
 	})
@@ -218,8 +218,8 @@ func (p *Haybale) SortBale() {
 				prev_string = p.haystalk[i].val.stringval
 			} else if *p.haystalk[i].val.stringval == *prev_string {
 				/*
-					We re-assign to the shared string pointer, getting rid
-					of the original string pointer.
+					We re-assign to the shared string pointer, removing the
+					last reference to the original string.
 					The Go garbage collector should catch it from there.
 				*/
 				p.haystalk[i].val.stringval = prev_string
