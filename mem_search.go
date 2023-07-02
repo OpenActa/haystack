@@ -60,10 +60,12 @@ func (p *Haystack) SearchKeyValArray(kv_array map[string]string) {
 		hv = append(hv, new_hv)
 	}
 
-	fmt.Fprintf(os.Stderr, "Search conditions: hv = %v\n", hv) // DEBUG
-	for i := 0; i < len(hv); i++ {
-		fmt.Fprintf(os.Stderr, "[%d] %s=%s\n", i, *p.Dict.dkey[hv[i].dkey], *hv[i].val.GetString())
-	}
+	/*
+		fmt.Fprintf(os.Stderr, "Search conditions: hv = %v\n", hv) // DEBUG
+		for i := 0; i < len(hv); i++ {	// The following only works on strings
+			fmt.Fprintf(os.Stderr, "[%d] %s=%s\n", i, *p.Dict.dkey[hv[i].dkey], *hv[i].val.GetString())
+		}
+	*/
 
 	// Run through all Haybales
 	for i := range p.Haybale {
@@ -90,10 +92,10 @@ func (p *Haystack) SearchKeyValArray(kv_array map[string]string) {
 		*/
 	haystalk_loop:
 		for j := sort.Search(stalks, func(x int) bool {
-			// Since our data is sorted in ascending order, we search with <=
-			res := hv[0].Compare(*cur_hb.haystalk[x])
-			fmt.Fprintf(os.Stderr, "res=%d\n", res) // DEBUG
-			if res <= 0 {
+			// Since our data is sorted in ascending order, we search with >=
+			res := (*cur_hb.haystalk[x]).Compare(hv[0])
+			//fmt.Fprintf(os.Stderr, "res=%d\n", res) // DEBUG
+			if res >= 0 {
 				return true
 			} else {
 				return false
@@ -101,7 +103,7 @@ func (p *Haystack) SearchKeyValArray(kv_array map[string]string) {
 		}); j < stalks && cur_hb.haystalk[j].Compare(hv[0]) == 0; j++ {
 			// ----
 			if len(hv) > 1 {
-				fmt.Fprintf(os.Stderr, "Part match: checking additional conditions\n")
+				//fmt.Fprintf(os.Stderr, "Part match: checking additional conditions\n")
 
 				// Here we check for additional conditions (AND clause style)
 				for k := 1; k < len(hv); k++ { // from 1: 2nd key/val onward
@@ -114,11 +116,11 @@ func (p *Haystack) SearchKeyValArray(kv_array map[string]string) {
 						}
 					}
 					if !found { // No match for this entry, so we can shortcut out
-						break haystalk_loop
+						continue haystalk_loop
 					}
 				}
 			} else {
-				fmt.Fprintf(os.Stderr, "No additional conditions\n")
+				//fmt.Fprintf(os.Stderr, "No additional conditions\n")
 			}
 			// ----
 
