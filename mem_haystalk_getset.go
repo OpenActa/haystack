@@ -50,7 +50,8 @@ func (p *Val) SetFloat(f float64) bool {
 func (p *Val) GetString() *string {
 	// Catch the bad.
 	if p.valtype != valtype_string {
-		return nil
+		sv := ""
+		return &sv
 	}
 
 	return p.stringval
