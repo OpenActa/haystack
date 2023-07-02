@@ -237,6 +237,7 @@ func (p *Haystack) getDisk2MemHaybale(content []byte) error {
 	new_hb.time_last = int64(getUintFromData(reader, 8))
 
 	var prev_string *string
+	var read_len uint32
 	for i := 0; i < read_num_haystalks; i++ {
 		var newstalk Haystalk
 
@@ -247,6 +248,9 @@ func (p *Haystack) getDisk2MemHaybale(content []byte) error {
 		}
 
 		newstalk.dkey = uint32(getUintFromData(reader, 3))
+		if p.Dict.dkey[newstalk.dkey] == nil { // DEBUG
+			panic(fmt.Sprintf("Reading back nil referenced dkey %d from disk\n", newstalk.dkey))
+		}
 
 		read_valtype := uint8(getUintFromData(reader, 1))
 
@@ -261,7 +265,7 @@ func (p *Haystack) getDisk2MemHaybale(content []byte) error {
 			newstalk.val.SetFloat(getFloatFromData(reader, 8))
 
 		case valtype_string:
-			read_len := uint32(getUintFromData(reader, 4))
+			read_len = uint32(getUintFromData(reader, 4))
 			if read_len == len_dup {
 				if prev_string == nil { // best to check these things
 					return fmt.Errorf("de-dupped string indicated but not present")
@@ -275,12 +279,18 @@ func (p *Haystack) getDisk2MemHaybale(content []byte) error {
 			}
 		}
 
+		new_hb.Memsize += 37 // Haystalk struct, approx
+		if newstalk.val.valtype == valtype_string && read_len != len_dup {
+			new_hb.Memsize += uint32(2 + len(*newstalk.val.stringval))
+		}
+
 		new_hb.haystalk[i] = &newstalk // Append stalk into the haybale
 		newstalk.self_ofs = uint32(i)  // ofs of self. Not really needed here since we're immutable
 
 		new_hb.num_haystalks++
 	}
 
+	p.memsize += new_hb.Memsize       // Calculate in this new haybale
 	new_hb.is_sorted_immutable = true // Set to immutable (obviously) and it's sorted.
 	// TODO: with multiple go routines we probably need to have a semaphore around the following
 	p.Haybale = append(p.Haybale, &new_hb) // Append to data available for search
