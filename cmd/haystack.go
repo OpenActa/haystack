@@ -1,4 +1,4 @@
-// OpenActa - Haystack (index) handling - ProtoBuffers definition
+// OpenActa/Haystack test and benchmark CLI
 // Copyright (C) 2023 Arjen Lentz & Lentz Pty Ltd; All Rights Reserved
 // <arjen (at) openacta (dot) dev>
 
@@ -108,20 +108,28 @@ func main() {
 			action = true
 
 		case "-kv":
-			if curarg+2 < len(os.Args) {
-				curarg++
-				ks := os.Args[curarg]
-				curarg++
-				vs := os.Args[curarg]
-				hs.SortAllBales()
-				hs.SearchKeyVal(ks, vs)
+			hs.SortAllBales()
 
-				action = true
+			kv_array := make(map[string]string)
+			if curarg+2 < len(os.Args) {
+				for curarg+2 < len(os.Args) {
+					kv_array[os.Args[curarg+1]] = os.Args[curarg+2]
+					curarg += 2
+				}
 			} else {
 				fmt.Fprintf(os.Stderr, "Missing options for -kv (requires a key and a value)\n")
+				break
 			}
 
+			/*
+				for k, v := range kv_array {
+					hs.SearchKeyVal(k, v)
+				}
+			*/
+			hs.SearchKeyValArray(kv_array)
+
 			action = true
+			curarg = len(os.Args) // Hack so we're always the last param(s)
 
 		case "-w":
 			if curarg+1 < len(os.Args) {
@@ -162,11 +170,11 @@ func main() {
 
 	if !action {
 		fmt.Fprintf(os.Stderr, "Usage: %s ...\n", os.Args[0])
-		fmt.Fprintf(os.Stderr, " -i <file>        Ingest JSON from <file> to mem\n")
-		fmt.Fprintf(os.Stderr, " -w <file>        Write mem to Haybale <file>\n")
-		fmt.Fprintf(os.Stderr, " -r <file>        Read Haybale <file> into mem\n")
-		fmt.Fprintf(os.Stderr, " -p               Print mem to stdout\n")
-		fmt.Fprintf(os.Stderr, " -kv <key> <val>  Search for <key> <value> pair in mem\n")
+		fmt.Fprintf(os.Stderr, " -i <file>            Ingest JSON from <file> to mem\n")
+		fmt.Fprintf(os.Stderr, " -w <file>            Write mem to Haybale <file>\n")
+		fmt.Fprintf(os.Stderr, " -r <file>            Read Haybale <file> into mem\n")
+		fmt.Fprintf(os.Stderr, " -p                   Print mem to stdout\n")
+		fmt.Fprintf(os.Stderr, " -kv <key> <val> ...  Search for <key> <value> pair(s) in mem\n")
 	}
 }
 
