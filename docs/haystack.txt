@@ -66,27 +66,43 @@ We adopted a Haystack analogy (stalk-bunch-bale-stack) as it helps to not
 confuse the system with other (different) database environments.
 
 
-Haystack structure diagram
+	Haystack structure diagram
 
-	+--------+---------------------------------+---------+
-	| Header | (Dictionary & Haybale) ...      | Trailer |
-	+--------+-------------+-------------------+---------+
-	         |                \_Bunch ...      |
-	         +---------------------------------+
-	         |                  \_Haystalk ... |
-	         +---------------------------------+
+		+--------+---------------------------------+---------+
+		| Header | (Dictionary & Haybale) ...      | Trailer |
+		+--------+-------------+-------------------+---------+
+		         |                \_Bunch ...      |
+		         +---------------------------------+
+		         |                  \_Haystalk ... |
+		         +---------------------------------+
 
 The key Dictionary is implemented using a 24-bit hash table. Haybales are
 Sorted String Tables (SSTable), implemented without Log Structured Merge
 Trees (LSM Trees) or mutability (update/delete), so that integrity of the log
 data is always retained. Thus, Haystalks also do not contain "tombstones"
 (indicator that data is obsolete).
+Haystalks are interlinked in Bunches to create "rows", while retaining the
+unique ability to directly and effectively search across all "columns".
+The system always makes _timestamp the first column in a bunch.
+
+	Bunch structure diagram
+		   __________________________
+    	  /                          \
+	      v                          |
+  	+------------+    +------+    +------+ 
+  	| _timestamp | -> | key1 | -> | key2 | -> ...
+  	+------------+    +------+    +------+ 
+          ^              |
+		  \______________/
+
 In the reference implementation, Key-Value (KV) entries are added sequentially
 and not immediately searchable. First a sort operation on the Haybale is
 required, which flags it as sorted & immutable. At this stage, neighbouring
 string values are de-duplicated (this de-duplication also applies to the
-on-disk format). Haystalks are interlinked to create "rows", while retaining
-the unique ability to directly and effectively search across all "columns".
+on-disk format). 
+
+
+The file storage format is as follows:
 
 
 Disk Section (DiskSection) structure diagram
