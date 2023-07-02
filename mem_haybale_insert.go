@@ -71,7 +71,7 @@ func (p *Haybale) insertStalk(d *Dictionary, k string, v string) uint32 {
 	}
 
 	// Update memsize on the fly, otherwise it'd be too slow
-	p.Memsize += 25 // Haystalk struct
+	p.Memsize += 37 // Haystalk struct, approx
 	if newstalk.val.valtype == valtype_string {
 		p.Memsize += uint32(2 + len(*newstalk.val.stringval))
 	}
@@ -128,6 +128,8 @@ func (p *Haybale) InsertBunch(d *Dictionary, flatmap map[string]interface{}) {
 			}
 		}
 	}
+
+	// Now insert all the KV pairs as stalks
 
 	prev = haystalk_ofs_nil
 
@@ -186,33 +188,7 @@ func (p *Haybale) SortBale() {
 	// If we used our own sorting function, we could take "self_ofs" out and save memory...
 	// (now it needs to be part of the same struct. Other optimisations may also be possible.
 	sort.Slice(p.haystalk, func(p1, p2 int) bool {
-		// TODO: use the HayStalk.Compare* functions here
-
-		// First, sort our slice by dkey
-		if p.haystalk[p1].dkey < p.haystalk[p2].dkey {
-			return true
-		} else if p.haystalk[p1].dkey > p.haystalk[p2].dkey {
-			return false
-		}
-
-		// dkey equal, so now sort by valtype
-		if p.haystalk[p1].val.valtype < p.haystalk[p2].val.valtype {
-			return true
-		} else if p.haystalk[p1].val.valtype > p.haystalk[p2].val.valtype {
-			return false
-		}
-
-		// valtype also equal, so now sort by value
-		switch p.haystalk[p1].val.valtype {
-		case valtype_int:
-			return p.haystalk[p1].val.GetInt() < p.haystalk[p2].val.GetInt()
-		case valtype_float:
-			return p.haystalk[p1].val.GetFloat() < p.haystalk[p2].val.GetFloat()
-		case valtype_string:
-			return *p.haystalk[p1].val.GetString() < *p.haystalk[p2].val.GetString()
-		default:
-			return false // This shouldn't happen
-		}
+		return p.haystalk[p1].Compare(*p.haystalk[p2]) < 0
 	})
 
 	// Now we create a map where newold_map[i] points to its old self
@@ -265,3 +241,5 @@ func (p *Haybale) SortBale() {
 	fmt.Fprintf(os.Stderr, "num_haystalks = %v, Heap was=%dM, now=%dM (%.02f%% gain), TotalAlloc=%dM\n",
 		p.num_haystalks, oldalloc, newalloc, 100.0-((float32(newalloc)/float32(oldalloc))*100.0), totalalloc)
 }
+
+// EOF
