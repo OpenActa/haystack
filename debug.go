@@ -17,7 +17,10 @@
 
 package haystack
 
-import "fmt"
+import (
+	"fmt"
+	"os"
+)
 
 // Print Haybale (TEST/DEBUG purposes)
 func (p *Haybale) PrintBale(d *Dictionary) {
@@ -29,6 +32,10 @@ func (p *Haybale) PrintBale(d *Dictionary) {
 		}
 
 		for r := p.haystalk[n].first_ofs; r != haystalk_ofs_nil; r = p.haystalk[r].next_ofs {
+			if d.dkey[(*p.haystalk[r]).dkey] == nil { // DEBUG
+				fmt.Fprintf(os.Stderr, "Assert: nil ptr from dkey %v\n", (*p.haystalk[r]).dkey)
+				continue
+			}
 			fmt.Printf("%v=", *d.dkey[(*p.haystalk[r]).dkey])
 
 			switch (*p.haystalk[r]).val.valtype {
