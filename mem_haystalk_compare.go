@@ -18,8 +18,6 @@
 package haystack
 
 import (
-	"fmt"
-	"os"
 	"strconv"
 	"strings"
 )
@@ -179,7 +177,7 @@ func (p *Haystalk) CompareString(s *string) (int, bool) {
 		// drops out of switch to string compare
 
 	case valtype_string:
-		fmt.Fprintf(os.Stderr, "Comparing %s | %s\n", *s, *p.val.GetString()) // DEBUG
+		//fmt.Fprintf(os.Stderr, "Comparing %s | %s\n", *s, *p.val.GetString()) // DEBUG
 
 		// Check for exact UTF-8 match (case-insensitive)
 		// https://pkg.go.dev/strings#EqualFold
