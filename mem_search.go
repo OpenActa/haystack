@@ -122,6 +122,7 @@ func (p *Haystack) SearchKeyValArray(kv_array map[string]string) {
 			} /* else {
 				//fmt.Fprintf(os.Stderr, "No additional conditions\n")
 			}*/
+
 			// ----
 
 			// Got a match!
