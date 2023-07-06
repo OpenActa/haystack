@@ -18,8 +18,6 @@
 package haystack
 
 import (
-	"fmt"
-	"os"
 	"strconv"
 	"strings"
 )
