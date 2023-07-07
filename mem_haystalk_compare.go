@@ -35,16 +35,44 @@ func (p *Haystalk) Compare(hv Haystalk) int {
 
 	// Check value type
 	//fmt.Fprintf(os.Stderr, "Comparing valtype %d | %d\n", p.val.valtype, hv.val.valtype) // DEBUG
-	if p.val.valtype > hv.val.valtype {
-		return 1
-	} else if p.val.valtype < hv.val.valtype {
-		return -1
+	/*
+		if p.val.valtype > hv.val.valtype {
+			return 1
+		} else if p.val.valtype < hv.val.valtype {
+			return -1
+		}
+	*/
+	switch p.val.(type) {
+	case int64:
+		switch hv.val.(type) {
+		case int64:
+			return 0
+		default:
+			return -1
+		}
+	case float64:
+		switch hv.val.(type) {
+		case int64:
+			return -1
+		case float64:
+			return 0
+		default:
+			return 1
+		}
+	default:
+		switch hv.val.(type) {
+		case *string:
+			return 0
+		default:
+			return 1
+		}
 	}
+
 	// same type
 
 	// Check value
-	switch p.val.valtype {
-	case valtype_int:
+	switch p.val.(type) {
+	case int64:
 		i1 := p.val.GetInt()
 		i2 := hv.val.GetInt()
 		if i1 > i2 {
@@ -54,7 +82,7 @@ func (p *Haystalk) Compare(hv Haystalk) int {
 		} else {
 			return 0
 		}
-	case valtype_float:
+	case float64:
 		f1 := p.val.GetFloat()
 		f2 := hv.val.GetFloat()
 		if f1 > f2 {
@@ -64,7 +92,7 @@ func (p *Haystalk) Compare(hv Haystalk) int {
 		} else {
 			return 0
 		}
-	case valtype_string:
+	default:
 		sv1 := *p.val.GetString()
 		sv2 := *hv.val.GetString()
 		//fmt.Fprintf(os.Stderr, "Comparing string %s | %s\n", sv1, sv2) // DEBUG
@@ -86,18 +114,16 @@ func (p *Haystalk) Compare(hv Haystalk) int {
 		} else {
 			return 0
 		}
-	default:
-		panic("Compare function fail")
 	}
 }
 
 // Function to compare an int with a Haystalk value
 func (p *Haystalk) CompareInt(i int64) (int, bool) {
-	switch p.val.valtype {
-	case valtype_int:
+	switch p.val.(type) {
+	case int64:
 		// drop out so we can re-use the code for string
 
-	case valtype_float:
+	case float64:
 		if float64(i) > p.val.GetFloat() {
 			return 1, true
 		} else if float64(i) < p.val.GetFloat() {
@@ -106,16 +132,13 @@ func (p *Haystalk) CompareInt(i int64) (int, bool) {
 			return 0, true
 		}
 
-	case valtype_string:
+	default:
 		i2, err := strconv.Atoi(*p.val.GetString())
 		if err != nil {
 			return 0, false
 		}
 		i = int64(i2)
 		// drops out of switch to int compare
-
-	default:
-		return 0, false
 	}
 
 	if i > p.val.GetInt() {
@@ -129,8 +152,8 @@ func (p *Haystalk) CompareInt(i int64) (int, bool) {
 
 // Function to compare a float with a Haystalk value
 func (p *Haystalk) CompareFloat(f float64) (int, bool) {
-	switch p.val.valtype {
-	case valtype_int:
+	switch p.val.(type) {
+	case int64:
 		if f > p.val.GetFloat() {
 			return 1, true
 		} else if f < p.val.GetFloat() {
@@ -139,19 +162,16 @@ func (p *Haystalk) CompareFloat(f float64) (int, bool) {
 			return 0, true
 		}
 
-	case valtype_float:
+	case float64:
 		// drop out so we can re-use the code for string
 
-	case valtype_string:
+	default:
 		f2, err := strconv.ParseFloat(*p.val.GetString(), 64)
 		if err != nil {
 			return 0, false
 		}
 		f = f2
 		// drops out of switch to float compare
-
-	default:
-		return 0, false
 	}
 
 	if float64(f) > p.val.GetFloat() {
@@ -167,16 +187,16 @@ func (p *Haystalk) CompareFloat(f float64) (int, bool) {
 func (p *Haystalk) CompareString(s *string) (int, bool) {
 	var sv2 string
 
-	switch p.val.valtype {
-	case valtype_int:
+	switch p.val.(type) {
+	case int64:
 		sv2 = strconv.FormatInt(p.val.GetInt(), 10)
 		// drops out of switch to string compare
 
-	case valtype_float:
+	case float64:
 		sv2 = strconv.FormatFloat(p.val.GetFloat(), 'f', -1, 64)
 		// drops out of switch to string compare
 
-	case valtype_string:
+	default:
 		//fmt.Fprintf(os.Stderr, "Comparing %s | %s\n", *s, *p.val.GetString()) // DEBUG
 
 		// Check for exact UTF-8 match (case-insensitive)
@@ -188,9 +208,6 @@ func (p *Haystalk) CompareString(s *string) (int, bool) {
 		// Or do it the long way.
 		sv2 = strings.ToLower(*p.val.GetString())
 		// drops out of switch to string compare
-
-	default:
-		return 0, false
 	}
 
 	sv := strings.ToLower(*s)

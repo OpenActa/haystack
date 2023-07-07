@@ -36,18 +36,7 @@ func (p *Haybale) PrintBale(d *Dictionary) {
 				fmt.Fprintf(os.Stderr, "Assert: nil ptr from dkey %v\n", (*p.haystalk[r]).dkey)
 				continue
 			}
-			fmt.Printf("%v=", *d.dkey[(*p.haystalk[r]).dkey])
-
-			switch (*p.haystalk[r]).val.valtype {
-			case valtype_int:
-				fmt.Printf("%v", p.haystalk[r].val.GetInt())
-			case valtype_float:
-				fmt.Printf("%v", p.haystalk[r].val.GetFloat())
-			case valtype_string:
-				fmt.Printf("%v", *p.haystalk[r].val.GetString())
-			}
-
-			fmt.Printf("\n")
+			fmt.Printf("%v=%v\n", *d.dkey[(*p.haystalk[r]).dkey], p.haystalk[r].val.Get())
 		}
 
 		fmt.Printf("\n")

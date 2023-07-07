@@ -63,23 +63,16 @@ type Haybale struct {
 
 type Haystalk struct {
 	dkey uint32 // Key = Dictionary lookup #
-	val  Val    // Value
+	val  Val    // Value (int64, float64, *string)
 
 	self_ofs  uint32 // Pointer to self. Used during sort.
 	first_ofs uint32 // offset to first (_timestamp) in Haystalk (self for first)
 	next_ofs  uint32 // offset to next in Haystalk (0xffffffff for last)
 }
 
-type ValType interface {
-	int64 | float64 | *string
-}
-
-type Val struct {
-	valtype uint8 // Value type (int, float, string)
-
-	intval    int64
-	floatval  float64
-	stringval *string
+type Val interface {
+	Get() interface{}
+	Set(interface{})
 }
 
 // EOF

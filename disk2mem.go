@@ -259,10 +259,10 @@ func (p *Haystack) getDisk2MemHaybale(content []byte) error {
 
 		switch read_valtype {
 		case valtype_int:
-			newstalk.val.SetInt(int64(getUintFromData(reader, 8)))
+			newstalk.val.Set(int64(getUintFromData(reader, 8)))
 
 		case valtype_float:
-			newstalk.val.SetFloat(getFloatFromData(reader, 8))
+			newstalk.val.Set(getFloatFromData(reader, 8))
 
 		case valtype_string:
 			read_len = uint32(getUintFromData(reader, 4))
@@ -271,17 +271,21 @@ func (p *Haystack) getDisk2MemHaybale(content []byte) error {
 					return fmt.Errorf("de-dupped string indicated but not present")
 				}
 
-				newstalk.val.SetString(prev_string) // use the dup
+				newstalk.val.Set(prev_string) // use the dup
 			} else {
 				s := getStringFromData(reader, int(read_len))
-				newstalk.val.SetString(s)
+				newstalk.val.Set(s)
 				prev_string = s
 			}
 		}
 
 		new_hb.Memsize += 37 // Haystalk struct, approx
-		if newstalk.val.valtype == valtype_string && read_len != len_dup {
-			new_hb.Memsize += uint32(2 + len(*newstalk.val.stringval))
+		switch newstalk.val.(type) {
+		case string:
+			if read_len != len_dup {
+				new_hb.Memsize += uint32(2 + len(newstalk.val.Get()))
+			}
+		default:
 		}
 
 		new_hb.haystalk[i] = &newstalk // Append stalk into the haybale

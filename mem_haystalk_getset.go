@@ -17,49 +17,42 @@
 
 package haystack
 
-func (p *Val) GetInt() int64 {
-	// Catch the bad.
-	if p.valtype != valtype_int {
-		return 0
-	}
-
-	return p.intval
+type Integer struct {
+	value int64
 }
 
-func (p *Val) SetInt(i int64) bool {
-	p.valtype = valtype_int
-	p.intval = i
+func (p *Integer) GetInt() int64 {
+	return int64(p.value)
+}
+
+func (p *Integer) SetInt(i int64) bool {
+	p.value = int64(i)
 	return true
 }
 
-func (p *Val) GetFloat() float64 {
-	// Catch the bad.
-	if p.valtype != valtype_float {
-		return 0.0
-	}
-
-	return p.floatval
+type Float struct {
+	value float64
 }
 
-func (p *Val) SetFloat(f float64) bool {
-	p.valtype = valtype_float
-	p.floatval = f
+func (p *Float) GetFloat() float64 {
+	return float64(p.value)
+}
+
+func (p *Float) SetFloat(f float64) bool {
+	p.value = f
 	return true
 }
 
-func (p *Val) GetString() *string {
-	// Catch the bad.
-	if p.valtype != valtype_string {
-		sv := ""
-		return &sv
-	}
-
-	return p.stringval
+type String struct {
+	value *string
 }
 
-func (p *Val) SetString(s *string) bool {
-	p.valtype = valtype_string
-	p.stringval = s
+func (p *String) GetString() string {
+	return *p.value
+}
+
+func (p *String) SetString(s *string) bool {
+	p.value = s
 	return true
 }
 
