@@ -1,4 +1,4 @@
-// OpenActa/Haystack - unmarshall Haybale disk->mem format
+// OpenActa/Haystack - unmarshall Haystack disk->mem format
 // Copyright (C) 2023 Arjen Lentz & Lentz Pty Ltd; All Rights Reserved
 // <arjen (at) openacta (dot) dev>
 
@@ -16,11 +16,11 @@
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 /*
-   Read a Haybale back into memory.
-   Unsurprisingly this is slightly more finicky than writing it.
-   We need to check CRCs and other format aspects to ensure we're not
+   Read a Haystack back into memory.
+   Unsurprisingly reading is slightly more finicky than writing the data.
+   We need to check CRCs, and other format aspects, to ensure we're not
    reading in or processing garbage. We can't just blow up.
-   TODO: Everything needs to be checked/verified (_test coverage)
+   TODO: The code itself needs to be checked/verified (_test coverage)
 
    See doc/haystack.txt and mem2disk.go for reference
 */
@@ -33,6 +33,8 @@ import (
 	"hash/crc32"
 	"io"
 	"math"
+
+	"github.com/dsnet/compress/bzip2"
 )
 
 // Read a byte
@@ -298,6 +300,18 @@ func (p *Haystack) getDisk2MemHaybale(content []byte) error {
 	return nil
 }
 
+// bzip2's signatures are HSB (highest significant byte) first
+func bzip2_check_sig(dataslice []byte, len int, sigseq uint64) bool {
+	var res uint64
+
+	for i := 0; i < len; i++ {
+		res <<= 8
+		res |= uint64(dataslice[i])
+	}
+
+	return res == sigseq
+}
+
 // Process byte slice into complete Haystack structure
 // We check the wazoo out of this!
 func (p *Haystack) Disk2Mem(data []byte) error {
@@ -310,6 +324,27 @@ func (p *Haystack) Disk2Mem(data []byte) error {
 
 	if len > max_filesize {
 		return fmt.Errorf("file too long, not an OpenActa file?")
+	}
+
+	// TODO: decrypt
+
+	// check for bzip2 file and block signatures
+	if bzip2_check_sig(data, 2, bzip2_hdrMagic) &&
+		bzip2_check_sig(data[4:], 6, bzip2_blkMagic) {
+		// it's a bzip2 compressed file: decompress our data!
+		var bzip2_config bzip2.ReaderConfig
+		if reader, err := bzip2.NewReader(bytes.NewReader(data), &bzip2_config); err != nil {
+			return fmt.Errorf("error decompressing bzip2 OpenActa file")
+		} else if buf, err := io.ReadAll(reader); err != nil {
+			return fmt.Errorf("error decompressing bzip2 OpenActa file")
+		} else if reader.OutputOffset > max_filesize {
+			return fmt.Errorf("file too long, not an OpenActa file?")
+		} else {
+			reader.Close()
+
+			// assign decompressed data so we can process it
+			data = buf
+		}
 	}
 
 	// Now dive into the file's content

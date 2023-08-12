@@ -1,4 +1,4 @@
-// OpenActa/Haystack - marshall Haybale mem->disk format
+// OpenActa/Haystack - marshall Haystack mem->disk format
 // Copyright (C) 2023 Arjen Lentz & Lentz Pty Ltd; All Rights Reserved
 // <arjen (at) openacta (dot) dev>
 
@@ -25,10 +25,14 @@
 package haystack
 
 import (
+	"bytes"
+	"crypto/sha512"
 	"fmt"
 	"hash/crc32"
 	"math"
 	"strings"
+
+	"github.com/dsnet/compress/bzip2"
 )
 
 // TODO: make all this nicer. All the Go way, but no copying of stuff when it can be avoided.
@@ -153,6 +157,29 @@ func (p *Haystack) Mem2Disk() ([]byte, error) {
 	} else {
 		data = append(data, trailer...)
 	}
+
+	// Generate SHA512 for cryptographic signature
+	sha512 := sha512.Sum512(data)
+
+	// TODO: Sign cryptographically
+	_ = sha512
+
+	// compress
+	var bzip2_config bzip2.WriterConfig
+	var buf bytes.Buffer
+	bzip2_config.Level = bzip2.BestCompression
+	if writer, err := bzip2.NewWriter(&buf, &bzip2_config); err != nil {
+		return nil, fmt.Errorf("error compressing bzip2 OpenActa file")
+	} else if n, err := writer.Write(data); err != nil || n == 0 {
+		return nil, fmt.Errorf("error compressing bzip2 OpenActa file")
+	} else {
+		writer.Close()
+
+		// assign compressed buffer to data
+		data = buf.Bytes()
+	}
+
+	// TODO: crypt
 
 	return data, nil
 }

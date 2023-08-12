@@ -31,6 +31,9 @@ const (
 	max_filesize          = (1024 * 1024 * 1024) // 1GB (outer limit)
 	min_DiskHeaderBaselen = 12                   // Sig, section, len, CRC
 	len_dup               = 0xfffffffe           // Len to indicate de-dupped string
+
+	bzip2_hdrMagic = 0x425a         // Hex of "BZ"
+	bzip2_blkMagic = 0x314159265359 // BCD of PI
 )
 
 /*
