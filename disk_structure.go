@@ -27,33 +27,45 @@ package haystack
 */
 
 const (
-	min_filesize          = 54                   // len(Header) + len(Trailer)
-	max_filesize          = (1024 * 1024 * 1024) // 1GB (outer limit)
-	min_DiskHeaderBaselen = 12                   // Sig, section, len, CRC
-	len_dup               = 0xfffffffe           // Len to indicate de-dupped string
+	min_filesize = 58                   // len(Header) + len(Trailer)
+	max_filesize = (1024 * 1024 * 1024) // 1GB (outer limit)
+	len_dup      = 0xfffffffe           // Len to indicate de-dupped string
 
 	bzip2_hdrMagic = 0x425a         // Hex of "BZ"
 	bzip2_blkMagic = 0x314159265359 // BCD of PI
+
+	sha512_byte_len = 64 // SHA-512
+
+	AES_key_byte_len        = 32                         // AES256
+	aesgcm_nonce_byte_len   = 12                         // AES nonce is 92 bits
+	aesgcm_block_additional = aesgcm_nonce_byte_len + 16 // + AES GCM overhead
+
+	aes_test_uuid = "f9800d09-2a20-4ffe-8916-748783c1ea0a"
+	aes_test_key  = "5/QerSN8LrWRPkLoge4IfYT/Iv8X4GjQC3njnW6MlzU="
 )
 
 /*
 type DiskSection struct {
 	sig 	[3]byte		// Section signature
-	id		uint8		// File segment identifier
-	len		uint32		// Content length
-	<content>			// Section content
+	id		uint8		// File section identifier
+	unc_len	uint32		// Uncompressed content length
+	com_len	uint32		// Compressed content length
 	crc 	uint32		// IEEE CRC-32
+	<content>			// Section content (compressed and encrypted)
 }
 */
 
 const (
 	signature = 0xebfeda // Our 3 byte file/segment signature
+
+	min_DiskHeaderBaselen = 16 // # bytes in preamble of any section
 )
 
 const ( // Haystack file section identifiers
 	section_header     = 1
 	section_dictionary = 2
 	section_haybale    = 3
+	section_sha512     = 254
 	section_trailer    = 255
 )
 
@@ -61,7 +73,7 @@ const ( // Haystack file section identifiers
 type DiskFileHeader struct {
 	major     uint8     	// Major version
 	minor     uint8     	// Minor version
-	// currently no other fields
+	aes_uuid  [16]byte		// AES key uuid
 }
 */
 
@@ -73,7 +85,7 @@ const (
 /*
 type DiskDictHeader struct {
 	prev_ofs  uint32 		// offset of previous Dictionary+Haybale (or 0 for none)
-	num_dkeys uint32		// number of keys (24 bits, but 32 bits for alignment)
+	num_dkeys uint32		// number of keys (max 16777216)
 	<DiskDictEntry> ...		// Dictionary entries
 }
 */
@@ -121,6 +133,14 @@ const (
 	valtype_float  = 2
 	valtype_string = 3
 )
+
+/*
+type DiskFileSHA512 struct {
+	time_first uint64 	// _timestamp of first entry in this Haystack
+	time_last  uint64 	// _timestamp of last entry in this Haystack
+	sha512     [64]byte // SHA-512 over all of Haystack file
+}
+*/
 
 /*
 type DiskFileTrailer struct {

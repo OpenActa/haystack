@@ -26,14 +26,43 @@ package haystack
 
 import (
 	"bytes"
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/rand"
 	"crypto/sha512"
+	"encoding/base64"
 	"fmt"
 	"hash/crc32"
+	"io"
 	"math"
+	"os"
 	"strings"
 
 	"github.com/dsnet/compress/bzip2"
+	"github.com/google/uuid"
 )
+
+var aesgcm_nonce = make([]byte, aesgcm_nonce_byte_len)
+
+func init() {
+	// Create a unique starting nonce (feeding off the system random # generator)
+	// We do it here so it's only done once during app's lifetime.
+	// TODO: ideally we'd save the nonce (IV=Initialisation Vector) on HD or in Redis
+	if _, err := io.ReadFull(rand.Reader, aesgcm_nonce); err != nil {
+		panic(err)
+	}
+}
+
+// We must not re-use an IV (initialisation vector, nonce) so we increment it.
+func aes_inc_nonce() {
+	// We need to do the inc "by hand" as it's 96 bits, larger than any of our variable types
+	for i := 0; i < aesgcm_nonce_byte_len; i++ {
+		aesgcm_nonce[i]++         // increment
+		if aesgcm_nonce[i] != 0 { // overflow=carry
+			break // no carry = done
+		}
+	}
+}
 
 // TODO: make all this nicer. All the Go way, but no copying of stuff when it can be avoided.
 
@@ -87,34 +116,14 @@ func addKeyToData(buf *[]byte, dkey uint32, key *string) error {
 	return nil
 }
 
-// Assemble disk structure for the Haystack header
-func (p *Haystack) Mem2DiskFileHeader() ([]byte, error) {
-	content := make([]byte, 0, min_filesize)
-
-	addByteToData(&content, version_major)
-	addByteToData(&content, version_minor)
-
-	// Haystack (file) header
-	data := make([]byte, 0, min_filesize)
-
-	addMultibyteToData(&data, signature, 3)
-	addByteToData(&data, section_header)
-
-	addMultibyteToData(&data, uint64(len(content)), 4) // Len should be 2 for this version
-	data = append(data, content...)                    // After we write len, we can glue it all together
-
-	crc := crc32.ChecksumIEEE(data)           // CRC over all of the header data
-	addMultibyteToData(&data, uint64(crc), 4) // last of all, append CRC
-
-	return data, nil
-}
-
 // Assemble the disk structure for an entire Haystack
-func (p *Haystack) Mem2Disk() ([]byte, error) {
+// Return compressed/encrypted dataset, sha512 block, error
+func (p *Haystack) Mem2Disk() ([]byte, []byte, error) {
 	data := make([]byte, 0, 16384) // Set up our byte array, with some initial room to spare
 
-	if header, err := p.Mem2DiskFileHeader(); err != nil {
-		return nil, err
+	header, err := mem2DiskFileHeader()
+	if err != nil {
+		return nil, nil, err
 	} else {
 		data = append(data, header...)
 	}
@@ -129,14 +138,14 @@ func (p *Haystack) Mem2Disk() ([]byte, error) {
 		// For the first Haybale, prev_ofs will be 0:
 		// that will write out a full Dictionary and append it to our header.
 		if dc, err := p.Dict.Mem2Disk(prev_ofs); err != nil {
-			return nil, err
+			return nil, nil, err
 		} else {
 			data = append(data, dc...)
 		}
 
 		// After a Dictionary comes a Haybale structure
 		if hb, err := p.Haybale[i].Mem2Disk(&p.Dict); err != nil {
-			return nil, err
+			return nil, nil, err
 		} else {
 			data = append(data, hb...)
 		}
@@ -152,72 +161,212 @@ func (p *Haystack) Mem2Disk() ([]byte, error) {
 		}
 	}
 
-	if trailer, err := p.Mem2DiskFileTrailer(prev_ofs, time_first, time_last); err != nil {
-		return nil, err
+	if trailer, err := mem2DiskFileTrailer(prev_ofs, time_first, time_last); err != nil {
+		return nil, nil, err
 	} else {
 		data = append(data, trailer...)
 	}
 
-	// Generate SHA512 for cryptographic signature
-	sha512 := sha512.Sum512(data)
-
-	// TODO: Sign cryptographically
-	_ = sha512
-
-	// compress
-	var bzip2_config bzip2.WriterConfig
-	var buf bytes.Buffer
-	bzip2_config.Level = bzip2.BestCompression
-	if writer, err := bzip2.NewWriter(&buf, &bzip2_config); err != nil {
-		return nil, fmt.Errorf("error compressing bzip2 OpenActa file")
-	} else if n, err := writer.Write(data); err != nil || n == 0 {
-		return nil, fmt.Errorf("error compressing bzip2 OpenActa file")
-	} else {
-		writer.Close()
-
-		// assign compressed buffer to data
-		data = buf.Bytes()
+	// Generate SHA512 for cryptographic signature, over the entire
+	// compressed+encrypted dataset
+	sha512section, err := mem2DiskSHA512block(data, time_first, time_last)
+	if err != nil {
+		return nil, nil, err
 	}
 
-	// TODO: crypt
+	return data, sha512section, nil
+}
+
+func mem2DiskSHA512block(dataset []byte, time_first int64, time_last int64) ([]byte, error) {
+	var data = make([]byte, 0, 16384)
+	var content = make([]byte, 0, 16384)
+
+	// Give SHA512 file has a proper header so we have major/minor versioning
+	hdr, err := mem2DiskFileHeader()
+	if err != nil {
+		return nil, err
+	}
+
+	// Now for the SHA512 itself
+	sha512 := sha512.Sum512(dataset)
+
+	// section header
+	addMultibyteToData(&data, uint64(signature), 3)
+	addByteToData(&data, section_sha512)
+
+	// section content
+	addMultibyteToData(&content, uint64(time_first), 8)
+	addMultibyteToData(&content, uint64(time_last), 8)
+
+	for i := 0; i < sha512_byte_len; i++ {
+		addByteToData(&content, sha512[i]) // 32 bytes (512 bits) SHA512
+	}
+
+	// now we know the content length. Don't bother with compression.
+	addMultibyteToData(&data, uint64(len(content)), 4)
+	addMultibyteToData(&data, uint64(len(content)), 4)
+
+	crc := crc32.ChecksumIEEE(content)        // CRC over the content
+	addMultibyteToData(&data, uint64(crc), 4) // append CRC
+
+	// Encryption
+	encrypted_content, err := mem2DiskAES256GCMblock(&content, data)
+	if err != nil {
+		return nil, err
+	}
+
+	data = append(data, hdr...)
+	data = append(data, *encrypted_content...) // we can glue it all together
+
+	return data, nil
+}
+
+// Assemble disk structure for the Haystack header
+func mem2DiskFileHeader() ([]byte, error) {
+	content := make([]byte, 0, min_filesize)
+	data := make([]byte, 0, min_filesize)
+
+	addByteToData(&content, version_major)
+	addByteToData(&content, version_minor)
+
+	uuid, _ := uuid.Parse(aes_test_uuid)    // grab AES uuid
+	uuid_binary, _ := uuid.MarshalBinary()  // get it out in binary
+	for i := 0; i < len(uuid_binary); i++ { // 16 bytes
+		addByteToData(&content, uuid_binary[i]) // put it in our structure
+	}
+
+	// Haystack (file) header
+	addMultibyteToData(&data, signature, 3)
+	addByteToData(&data, section_header)
+
+	addMultibyteToData(&data, uint64(len(content)), 4) // Len should be 18 for this version
+	addMultibyteToData(&data, uint64(len(content)), 4) // No compression
+
+	crc := crc32.ChecksumIEEE(content)        // CRC over all of header content
+	addMultibyteToData(&data, uint64(crc), 4) // append CRC
+
+	// No encryption of file header, otherwise we can't convey uuid (chicken&egg)
+
+	data = append(data, content...) // we can glue it all together
 
 	return data, nil
 }
 
 // Assemble disk structure for the Haystack trailer
-func (p *Haystack) Mem2DiskFileTrailer(last_dict_ofs uint32, time_first int64, time_last int64) ([]byte, error) {
+func mem2DiskFileTrailer(last_dict_ofs uint32, time_first int64, time_last int64) ([]byte, error) {
 	content := make([]byte, 0, min_filesize)
+	data := make([]byte, 0, min_filesize)
 
 	addMultibyteToData(&content, uint64(last_dict_ofs), 4)
 	addMultibyteToData(&content, uint64(time_first), 8)
 	addMultibyteToData(&content, uint64(time_last), 8)
 
-	data := make([]byte, 0, min_filesize)
-
 	// Haystack (file) header
 	addMultibyteToData(&data, signature, 3)
 	addByteToData(&data, section_trailer)
 
-	addMultibyteToData(&data, uint64(len(content)), 4) // Len should be 16 for this version
-	data = append(data, content...)                    // After we write len, we can glue it all together
+	addMultibyteToData(&data, uint64(len(content)), 4) // Len should be 20 for this version
+	addMultibyteToData(&data, uint64(len(content)), 4) // No compression
 
-	crc := crc32.ChecksumIEEE(data)           // CRC over all of the header
-	addMultibyteToData(&data, uint64(crc), 4) // last of all, append CRC
+	crc := crc32.ChecksumIEEE(content)        // CRC over all of the trailer content
+	addMultibyteToData(&data, uint64(crc), 4) // append CRC
+
+	// Encryption
+	encrypted_content, err := mem2DiskAES256GCMblock(&content, data)
+	if err != nil {
+		return nil, err
+	}
+
+	data = append(data, *encrypted_content...) // we can glue it all together
 
 	return data, nil
+}
+
+// Assemble disk structure for bzip2 -9 compression
+// https://github.com/dsnet/compress
+// (Go's standard library implementation only does decompression)
+// Ref. https://github.com/dsnet/compress/blob/master/doc/bzip2-format.pdf
+func mem2DiskBzip2block(content []byte) ([]byte, error) {
+	//fmt.Fprintf(os.Stderr, "bzip2 -9\n")	// DEBUG
+
+	var bzip2_config bzip2.WriterConfig
+	var buf bytes.Buffer
+
+	bzip2_config.Level = bzip2.BestCompression // Choose best compression (-9 equiv)
+
+	writer, err := bzip2.NewWriter(&buf, &bzip2_config)
+	if err != nil {
+		return nil, fmt.Errorf("error bzip2 compressing: %v", err)
+	}
+
+	// Compress, bzip2 -9 style.
+	if _, err := writer.Write(content); err != nil {
+		return nil, fmt.Errorf("error bzip2 compressing: %v", err)
+	}
+	writer.Close()
+
+	// Check if our output is indeed shorter (it will almost always be)
+	if writer.OutputOffset > 0 && writer.OutputOffset < writer.InputOffset {
+		compressed_data := buf.Bytes()
+		return compressed_data, nil
+	}
+
+	// return original data, since compressed wasn't any shorter
+	return content, nil
+}
+
+// Assemble disk structure for an AES encrypted block
+// We use 256 bit AES block cipher in GCM mode, with AEAD
+// Ref. https://csrc.nist.gov/pubs/sp/800/38/d/final
+func mem2DiskAES256GCMblock(plaintext *[]byte, extra []byte) (*[]byte, error) {
+	fmt.Fprintf(os.Stderr, "Process AES256+GCM (extra=%v)\n", extra) // DEBUG
+
+	// Convert printable AES key string back to binary sequence we can use
+	key, err := base64.StdEncoding.DecodeString(aes_test_key)
+	if err != nil {
+		return nil, fmt.Errorf("error decoding base64 encoded AES key: %s", err)
+	}
+
+	// Create a new AES cipher block using the raw key
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, fmt.Errorf("error initialising AES cipher: %s", err)
+	}
+
+	// Create a new GCM cipher mode using the AES cipher block
+	aesgcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, fmt.Errorf("error initialising GCM cipher mode: %s", err)
+	}
+
+	// AES GCM mode adds some (16) bytes, so the encrypted dataset is longer!
+	encrypted_data := make([]byte, 0, len(*plaintext)+aesgcm.Overhead())
+
+	// Put in our section header in as additional authenticated data (AEAD).
+	// This allows us to authenticate (and validate) the stored sections in full.
+	encrypted_content := append(encrypted_data, aesgcm.Seal(nil, aesgcm_nonce, *plaintext, extra)...)
+
+	// Put it all together
+	data := make([]byte, 0, aesgcm.NonceSize()+len(*plaintext)+aesgcm.Overhead())
+	data = append(data, aesgcm_nonce...)
+	data = append(data, encrypted_content...)
+
+	aes_inc_nonce() // increment nonce so it doesn't get re-used
+
+	return &data, nil
 }
 
 // Assemble the disk structure for one Dictionary
 func (p *Dictionary) Mem2Disk(prev_ofs uint32) ([]byte, error) {
 	var data = make([]byte, 0, 16384)
+	var content = make([]byte, 0, 16384)
 
+	// section header
 	addMultibyteToData(&data, uint64(signature), 3)
 	addByteToData(&data, section_dictionary)
 
-	var content = make([]byte, 0, p.num_dkeys*32) // Give it a good initial space
-
 	addMultibyteToData(&content, uint64(prev_ofs), 4)    // File pointer to previous Dictionary&Haybale
-	addMultibyteToData(&content, uint64(p.num_dkeys), 4) // 4 rather than 3 bytes, for alignment
+	addMultibyteToData(&content, uint64(p.num_dkeys), 4) // Number of (new) dkeys, max. 16M
 	// fmt.Fprintf(os.Stderr, "Dict: prev_ofs=%d, num_dkeys=%d\n", prev_ofs, p.num_dkeys) // DEBUG
 
 	for i := uint32(0); i < hashtable_size; i++ {
@@ -238,11 +387,31 @@ func (p *Dictionary) Mem2Disk(prev_ofs uint32) ([]byte, error) {
 		p.dirty[i] = false // key handled, doesn't need to be written any more
 	}
 
-	addMultibyteToData(&data, uint64(len(content)), 4) // add len into the section start
-	data = append(data, content...)                    // After we write len, we can glue it all together
+	unc_len := len(content)
 
-	crc := crc32.ChecksumIEEE(data)           // CRC over all of the Dictionary data
-	addMultibyteToData(&data, uint64(crc), 4) // last of all, append CRC
+	crc := crc32.ChecksumIEEE(content) // CRC over all of the Dictionary content
+
+	// Compression
+	content, err := mem2DiskBzip2block(content)
+	if err != nil {
+		return nil, err
+	}
+	com_len := len(content)
+
+	//fmt.Fprintf(os.Stderr, "Dict mem2disk() unc_len=%d, com_len=%d\n", unc_len, com_len) // DEBUG
+
+	addMultibyteToData(&data, uint64(unc_len), 4) // add uncompressed len into the section start
+	addMultibyteToData(&data, uint64(com_len), 4) // add compressed len into the section start
+
+	addMultibyteToData(&data, uint64(crc), 4) // append CRC
+
+	// Encryption
+	encrypted_content, err := mem2DiskAES256GCMblock(&content, data)
+	if err != nil {
+		return nil, err
+	}
+
+	data = append(data, *encrypted_content...) // we can glue it all together
 
 	return data, nil
 }
@@ -254,6 +423,7 @@ func (p *Haybale) Mem2Disk(d *Dictionary) ([]byte, error) {
 
 	p.SortBale() // First of all, make sure this bale is sorted.
 
+	// section header
 	addMultibyteToData(&data, uint64(signature), 3)
 	addByteToData(&data, section_haybale)
 
@@ -295,11 +465,26 @@ func (p *Haybale) Mem2Disk(d *Dictionary) ([]byte, error) {
 		}
 	}
 
-	addMultibyteToData(&data, uint64(len(content)), 4) // add len into the section start
-	data = append(data, content...)                    // After we write len, we can glue it all together
+	addMultibyteToData(&data, uint64(len(content)), 4) // add uncompressed len into the section start
 
-	crc := crc32.ChecksumIEEE(data) // CRC over this Haybale
-	addMultibyteToData(&data, uint64(crc), 4)
+	crc := crc32.ChecksumIEEE(content) // CRC over all of the Haybale content
+
+	// Compression
+	content, err := mem2DiskBzip2block(content)
+	if err != nil {
+		return nil, err
+	}
+	addMultibyteToData(&data, uint64(len(content)), 4) // add compressed len into the section start
+
+	addMultibyteToData(&data, uint64(crc), 4) // append CRC
+
+	// Encryption
+	encrypted_content, err := mem2DiskAES256GCMblock(&content, data)
+	if err != nil {
+		return nil, err
+	}
+
+	data = append(data, *encrypted_content...) // we can glue it all together
 
 	return data, nil
 }

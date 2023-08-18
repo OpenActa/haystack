@@ -32,7 +32,7 @@ func main() {
 	fmt.Fprintln(os.Stderr, "Haystack - Haystack log management system test & benchmark tool")
 	fmt.Fprintln(os.Stderr, "Copyright (C) 2023 Arjen Lentz & Lentz Pty Ltd; All Rights Reserved")
 	fmt.Fprintln(os.Stderr, "Licenced under the Affero General Public Licence (AGPL) v3(+)")
-	fmt.Fprintln(os.Stderr, "")
+	fmt.Fprintln(os.Stderr)
 
 	hs.Haybale = make([]*haystack.Haybale, 0)
 
@@ -137,7 +137,12 @@ func main() {
 				fname := os.Args[curarg]
 				fmt.Fprintf(os.Stderr, "Writing Haystack file '%s'\n", fname)
 
-				data, _ := hs.Mem2Disk() // also returns error
+				// Start the clock
+				start := time.Now()
+				data, sha512block, _ := hs.Mem2Disk() // also returns error
+				duration := time.Since(start)
+				fmt.Fprintf(os.Stderr, "Mem2Disk() duration: %v\n", duration)
+				_ = sha512block
 				os.WriteFile(fname, data, 0600)
 
 				action = true
@@ -156,12 +161,15 @@ func main() {
 				if data, err := os.ReadFile(fname); err != nil {
 					fmt.Fprintf(os.Stderr, "Error reading Haystack file %s: %v\n", fname, err)
 				} else {
+					// Start the clock
+					start := time.Now()
 					if err := hs.Disk2Mem(data); err != nil {
 						fmt.Fprintf(os.Stderr, "Reading Haystack file %s: %v\n", fname, err)
 					}
-
-					action = true
+					duration := time.Since(start)
+					fmt.Fprintf(os.Stderr, "Disk2Mem() duration: %v\n", duration)
 				}
+				action = true
 			} else {
 				fmt.Fprintf(os.Stderr, "Missing option for -r (requires a filename)\n")
 			}
@@ -171,8 +179,8 @@ func main() {
 	if !action {
 		fmt.Fprintf(os.Stderr, "Usage: %s ...\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, " -i <file>            Ingest JSON from <file> to mem\n")
-		fmt.Fprintf(os.Stderr, " -w <file>            Write mem to Haybale <file>\n")
-		fmt.Fprintf(os.Stderr, " -r <file>            Read Haybale <file> into mem\n")
+		fmt.Fprintf(os.Stderr, " -w <file>            Write mem to Haystack <file>\n")
+		fmt.Fprintf(os.Stderr, " -r <file>            Read Haystack <file> into mem\n")
 		fmt.Fprintf(os.Stderr, " -p                   Print mem to stdout\n")
 		fmt.Fprintf(os.Stderr, " -kv <key> <val> ...  Search for <key> <value> pair(s) in mem\n")
 	}

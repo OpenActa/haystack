@@ -3,52 +3,11 @@ Format of an OpenActa Haystack file, version 1.0
 Copyright (C) 2023 Arjen Lentz & Lentz Pty Ltd; All Rights Reserved
 <arjen (at) openacta (dot) dev>
 
+This document describes the OpenActa Haystack file format on non-volatile media.
+
 The OpenActa/Haystack documentation is licensed under a CC-BY-SA license.
 https://creativecommons.org/licenses/by-sa/4.0/
-
-
-This document describes the uncompressed/unencrypted OpenActa Haystack file
-format on non-volatile media.
-
-Characteristics
-    - Time-based Key-value store (non-unique)
-    - Linked haystack stalks (tuples) make up bales (rows)
-    - WORM (write-once, read-many) - no updates/deletes possible
-    - Keys referenced via Dictionary for efficiency
-    - Sorted array of entries in Haybale (enabling binary search)
-    - All entries are in the same index, ergo all entries are indexed
-    - Individual files kept within approx 512MB size (definitely <1G)
-    - Fully handled in memory (no random access on disk)
-    - Multi-byte values stored in LittleEndian order
-    - Max 16 million distinct key names (24 bit)
-    - A bunch (_timestamp with all its tuples) is (probably) unique
-      (since JSON is unsorted we don't know, and OpenActa doesn't care)
-    - Stalks within a bunch may duplicate
-    - Adjacent string values are de-duplicated both in memory and on disk
-      (approx 10% space benefit)
-    To do
-    - On-disk compression
-    - Signature (GPG or separate ed25519 ?) and encryption
-
-
-Haystack is not a general purpose DBMS, and should not be used for that purpose.
-It could be placed in the Very Large Database (VLDB) space, and its specialised
-WORM architecture avoids many of the issues generally encountered there.
-If Haystack were to be adapted to support update and delete operations, it
-would have to deal with those issues just like any other database system. That
-said, there may be an advantage in that Haystack has the "everything is indexed"
-capability.
-One aspect, Information Lifecycle Management, must be addressed in any
-implementation. The user has to to decide for how long logs are kept, however
-the system needs to consider that the requirement may be "forever".
-
-The Haystack storage format is designed for WORM (Write Once, Read Many).
-Any data written is never modified (aka immutable), which helps auditability,
-chain-of-custody. In addition, the format uses section signatures, CRCs, and
-other redundant	information	to help detecting file corruption, and aid with
-recovery in case of (partial) corruption of a file.
-(The viability of using Protocol Buffers (ProtoBuf) or FlatBuffers for the
-storage structure was evaluated, but dismissed, as it made some things awkward.)
+The reference implementation in Go is licensed under the Affero GPL v3+.
 
 
 High level overview:
@@ -66,6 +25,50 @@ We adopted a Haystack analogy (stalk-bunch-bale-stack) as it helps to not
 confuse the system with other (different) database environments.
 
 
+Characteristics
+    - Time-based Key-value store (non-unique)
+    - Linked haystack stalks (tuples) make up bales (rows)
+    - WORM (write-once, read-many) - no updates/deletes possible
+    - Keys referenced via hash based Dictionary for efficiency
+    - Sorted array of entries in Haybale (enabling binary search)
+    - All entries are in the same index, ergo all entries are indexed
+    - Individual files kept within approx 128-512MB size (definitely <1G)
+    - Fully handled in memory (no random access on disk)
+    - Multi-byte values stored in LittleEndian order
+    - Max 16 million distinct key names (24 bit)
+    - A bunch (UTC _timestamp with all its tuples) is (probably) unique
+      (since JSON is unsorted we don't know, and OpenActa doesn't care)
+    - Stalks within a bunch may duplicate
+    - Adjacent string values are de-duplicated both in memory and on disk
+      (approx 10% space benefit)
+	- Per Haystack file on-disk compression, encryption and signature:
+      -> compression: bzip2 -9 compatible (3:1 or better ratio)
+	  -> encryption: AES256-GCM with AEAD
+	  -> separate SHA-512 cryptographic signature
+
+
+Haystack is not a general purpose DBMS, and should not be used for that purpose.
+It could be placed in the Very Large Database (VLDB) space, and its specialised
+WORM architecture avoids many of the issues generally encountered there.
+If Haystack were to be adapted to support update and delete operations, it
+would have to deal with those issues just like any other database system. That
+said, there may be an advantage in that Haystack has the "everything is indexed"
+capability.
+One aspect, Information Lifecycle Management, must be addressed in any
+implementation. The user has to to decide for how long logs are kept, however
+the system needs to consider that the requirement may be "forever".
+
+The Haystack storage format is sequential, WORM (Write Once, Read Many). Any
+data written is never modified (aka immutable), which helps auditability and the
+chain-of-custody. A SHA512 signature is stored separately. In addition, the
+format uses section signatures, CRCs, and other redundant information to help
+detecting file corruption, and aid with recovery in case of (partial) corruption
+of a file. To not hinder the possibility of partial recovery, compression and
+encryption are also performed per section.
+(Note: the viability of using Protocol Buffers (ProtoBuf) or FlatBuffers for the
+storage structure was evaluated, but dismissed, as it made some things awkward.)
+
+
 	Haystack structure diagram
 
 		+--------+---------------------------------+---------+
@@ -76,14 +79,17 @@ confuse the system with other (different) database environments.
 		         |                  \_Haystalk ... |
 		         +---------------------------------+
 
-The key Dictionary is implemented using a 24-bit hash table. Haybales are
-Sorted String Tables (SSTable), implemented without Log Structured Merge
-Trees (LSM Trees) or mutability (update/delete), so that integrity of the log
-data is always retained. Thus, Haystalks also do not contain "tombstones"
+The key Dictionary is implemented using a 24-bit hash table.
+
+Haybales are Sorted String Tables (SSTable), implemented without Log Structured
+Merge Trees (LSM Trees) or mutability (update/delete), so that integrity of the
+log data is always retained. Thus, Haystalks also do not contain "tombstones"
 (indicator that data is obsolete).
+
 Haystalks are interlinked in Bunches to create "rows", while retaining the
-unique ability to directly and effectively search across all "columns".
-The system always makes _timestamp the first column in a bunch.
+unique ability to directly and efficiently search across all "fields".
+The system always makes _timestamp the first field in a bunch, also generating
+such a field if one does not already exist. _timestamp is always in UTC.
 
 	Bunch structure diagram
 		   __________________________
@@ -99,7 +105,13 @@ In the reference implementation, Key-Value (KV) entries are added sequentially
 and not immediately searchable. First a sort operation on the Haybale is
 required, which flags it as sorted & immutable. At this stage, neighbouring
 string values are de-duplicated (this de-duplication also applies to the
-on-disk format). 
+on-disk format).
+
+For each section type, the raw contents are first compressed, then encrypted,
+while the section header is also supplied as the 'additional data' of the AES
+encryption step to provide AEAD (Authenticated Encryption with Associated Data)
+functionality.
+
 
 
 The file storage format is as follows:
@@ -107,26 +119,47 @@ The file storage format is as follows:
 
 Disk Section (DiskSection) structure diagram
 
-		+--------------+----+-------------------+----- ... ----+-----------------------+
-		+ signature    | ID | content len (n)   |content       | IEEE CRC-32           |
-		+----+----+----+----+----+----+----+----+----- ... ----+-----+-----+-----+-----+
-	ofs |  0 |  1 |  2 |  3 |  4 |  5 |  6 |  7 | 8 ...    n-1 |  n  | n+1 | n+2 | n+3 |
-		+----+----+----+----+----+----+----+----+----- ... ----+-----+-----+-----+-----+
-		| da | fe | eb |  n | LSB    ...    MSB | xxx          | LSB      ...      MSB |
-		+----+----+----+----+----+----+----+----+----- ... ----+-----+-----+-----+-----+
-		| <CRC is over signature, ID, content len and content> |
-		+----+----+----+----+----+----+----+----+----- ... ----+
+		+--------------+----+-------------------+-------------------+-----------------------+----- ... ----+
+		+ signature    | ID | plain content len | compressed len    | IEEE CRC-32           | content*     |
+		+----+----+----+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+----- ... ----+
+	ofs |  0 |  1 |  2 |  3 |  4 |  5 |  6 |  7 |  8 |  9 | 10 | 11 |  12 |  13 |  14 |  15 | 16   ...   n |
+		+----+----+----+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+----- ... ----+
+		| da | fe | eb |  n | LSB    ...    MSB | LSB    ...    MSB | LSB      ...      MSB | xxx          |
+		+----+----+----+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+----- ... ----+
+
+		CRC is over the plain content only.
+		The AES256-GCM additional data (AEAD functionality) is used to validate
+		the other header and section specific fields.
+		(*) plain content is always compressed, then encrypted.
+		If (compressed len == plain content len), no compression was applied.
+
+
+	Compressed -> AES256-GCM:
+
+		+-----------------+---- ... ----+
+		| nonce (96 bits) | unencrypted |
+		+-----+-----+-----+---- ... ----+
+	ofs |   0 |     |  11 | 12  ...  n  |
+		+-----+-----+-----+---- ... ----+
+		| LSB   ...   MSB | xxx         |
+		+-----+-----+-----+---- ... ----+
+
+	The AES256-GCM encrypted content is consistently 28 bytes longer:
+	12 bytes (92 bits) for nonce, 16 bytes internally for AEAD functionality.
 
 
 ID 0: Disk File Header (DiskFileHeader) structure diagram
 
-		+---------------+---------------+
-		| version_major | version_minor |
-		+---------------+---------------+
-	ofs |       0       |       1       |
-		+---------------+---------------+
-		|       1       |       0       |
-		+---------------+---------------+
+		+---------------+---------------+-----------------+
+		| version_major | version_minor | AES crypt uuid  |
+		+---------------+---------------+-----------------+
+	ofs |       0       |       1       |   2   ...    17 |
+		+---------------+---------------+-----------------+
+		|       1       |       0       | xxx             |
+		+---------------+---------------+-----------------+
+
+	The crypt uuid uniquely identifies the AES key used to encrypt the sections.
+	This simplifies key management (rotation, etc) without impacting security.
 
 
 ID 1: Disk Dictionary Header (DiskDictHeader) structure diagram
@@ -139,7 +172,7 @@ ID 1: Disk Dictionary Header (DiskDictHeader) structure diagram
 		| LSB      ...      MSB | LSB      ...      MSB | xxx                |
 		+-----+-----+-----+-----+-----+-----+-----+-----+-------- ... -------+
 
-    Maximum 16M (16777216) dictionary keys, but written in 4 bytes here for alignment
+    Maximum 16M (16777216) dictionary keys allowed.
 
 
     Disk Dictionary Entry (DiskDictEntry) structure diagram
@@ -165,7 +198,7 @@ ID 2: Disk Haybale Header (DiskHaybaleHeader) structure diagram
 		| LSB      ...      MSB | LSB   ...   MSB | LSB   ...   MSB | xxx       |
 		+-----+-----+-----+-----+-----+-----+-----+-----------------+--- ... ---+
 
-    A Haybale must always be preceded by a Dictionary
+    A Haybale must always be preceded by a Dictionary (can be 0 new entries)
 
 
     Disk Haystalk (DiskHaystalk) structure diagram (type = int64 or IEEEfloat64)
@@ -201,6 +234,22 @@ ID 2: Disk Haybale Header (DiskHaybaleHeader) structure diagram
 		+----+----+----+------+----+----+----+-----+----+----+----+----+----+----+----+----+
 
 
+ID = 254: Disk SHA-512 Cryptographic Hash Block Header structure diagram
+
+		+-----------------+-----------------+--------- ... ---------+
+		| time_first      | time_last       | SHA-512               |
+		+-----+-----+-----+-----------------+-----+--- ... ---+-----+
+	ofs |   0 | ... |   7 |   8 | ... |  15 |  16 |    ...    |  79 |
+		+-----+-----+-----+-----------------+-----+--- ... ---+-----+
+		| LSB   ...   MSB | LSB   ...   MSB |                       |
+		+-----+-----+-----+-----------------+-----+--- ... ---+-----+
+
+	The SHA-512 block (binary SHA-512 as content) is stored separately to the
+	Haystack dataset. SHA-512 is calculated over the entire compressed+encrypted
+	dataset, from header to trailer (e.g. the entire Haystack file).
+	A SHA-512 block is itself also AES encrypted.
+
+
 ID 255: Disk Haystack Trailer structure diagram
 		+-----------------------+-----------------+-----------------+
 		| last_dict_ofs         | time_first      | time_last       |
@@ -209,6 +258,7 @@ ID 255: Disk Haystack Trailer structure diagram
 		+-----+-----+-----+-----+-----+-----+-----+-----------------+
 		| LSB      ...      MSB | LSB   ...   MSB | LSB   ...   MSB |
 		+-----+-----+-----+-----+-----+-----+-----+-----------------+
+
 
 
 Informal references:
