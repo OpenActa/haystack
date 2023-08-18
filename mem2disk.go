@@ -37,7 +37,6 @@ import (
 	"math"
 	"os"
 	"strings"
-
 	"github.com/dsnet/compress/bzip2"
 	"github.com/google/uuid"
 )
