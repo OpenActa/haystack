@@ -9,6 +9,8 @@
 *.dylib
 haystack
 cmd/haystack
+haystack-util
+cmd/haystack-util
 
 # Test binary, built with `go test -c`
 *.test

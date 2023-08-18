@@ -29,10 +29,14 @@ package haystack
 
 import (
 	"bytes"
+	"crypto/aes"
+	"crypto/cipher"
+	"encoding/base64"
 	"fmt"
 	"hash/crc32"
 	"io"
 	"math"
+	"os"
 
 	"github.com/dsnet/compress/bzip2"
 )
@@ -86,51 +90,83 @@ func getKeyFromData(reader *bytes.Reader) (uint32, *string) {
 
 // Check a section (CRC and other sanity), return (error), section type, length and content
 func (p *Haystack) getDisk2MemSections(data []byte) error {
-	reader := bytes.NewReader(data)
+	var read_com_len, read_unc_len int
 	var prev_section int
-	var read_len int
+	var err error
 
-	first_dictionary := true
+	file_reader := bytes.NewReader(data)
 
-	// Loop through each section in the Haystack file
+	// Loop through each section in the Haystack Haystack
 trailer:
-	for ofs := 0; reader.Len() >= min_DiskHeaderBaselen; ofs += min_DiskHeaderBaselen + read_len {
+	for {
+		// read in next section header
+		header := make([]byte, min_DiskHeaderBaselen)
+		if n, err := file_reader.Read(header); err != nil || n < min_DiskHeaderBaselen {
+			return fmt.Errorf("unexpected end of file while reading Haystack")
+		}
+		hdr_reader := bytes.NewReader(header)
+
 		// Get signature
-		read_signature := getUintFromData(reader, 3)
+		read_signature := getUintFromData(hdr_reader, 3)
 		if read_signature != signature {
-			return fmt.Errorf("incorrect signature (0x%06x instead of 0x%06x), not an OpenActa file or file corrupt?",
+			return fmt.Errorf("incorrect signature (0x%06x instead of 0x%06x), not a Haystack or dataset corrupt?",
 				read_signature, signature)
 		}
 
-		read_section := getByteFromData(reader) // Get section identifier
+		read_section := getByteFromData(hdr_reader) // Get section identifier
 
-		// Get length (always in 4 bytes, to make things easier for this Disk2Mem code)
-		read_len = int(getUintFromData(reader, 4))
-		if read_len < 1 || read_len > max_filesize || read_len > reader.Len() {
-			return fmt.Errorf("stored length %d invalid, corrupted OpenActa file?", read_len)
-		}
-
-		content := data[ofs+8 : ofs+8+read_len] // Content of this section is here
-
-		// CRC is over signature (3), section type (1), len (4) content (n)
-		// len is just content
-		reader.Seek(int64(read_len), io.SeekCurrent)   // Seek past content to CRC location
-		read_crc := uint32(getUintFromData(reader, 4)) // Read stored CRC
-		// Now Reader is positioned exactly past end of section, ready for next
-
-		// Calculate our own CRC, to compare against the stored one
-		header_crc := crc32.ChecksumIEEE(data[ofs : ofs+8+read_len])
-		if read_crc != header_crc {
-			return fmt.Errorf("header CRC mismatch (read 0x%08x, calculated 0x%08x), OpenActa file corrupted?",
-				read_crc, header_crc)
-		}
-
-		// This behaves a bit like a state machine
+		fmt.Fprintf(os.Stderr, "getDisk2MemSections loop (section id: %d)\n", read_section) // DEBUG
 
 		if prev_section == 0 && read_section != section_header {
-			if read_section != section_header {
-				return fmt.Errorf("first section not header, not an OpenActa file or file corrupt?")
+			return fmt.Errorf("first section not header, not a Haystack or dataset corrupt?")
+		}
+
+		// Get lengths (uncompressed and compressed)
+		read_unc_len = int(getUintFromData(hdr_reader, 4)) // uncompressed len of content
+		read_com_len = int(getUintFromData(hdr_reader, 4)) // compressed len of content
+		if read_unc_len < 1 || read_unc_len > max_filesize ||
+			read_com_len < 1 || read_com_len > max_filesize ||
+			read_com_len > read_unc_len {
+			return fmt.Errorf("stored lengths %d (com), %d (unc) invalid, corrupted Haystack?", read_com_len, read_unc_len)
+		}
+
+		// CRC is over content (read_unc_len)
+		read_crc := uint32(getUintFromData(hdr_reader, 4)) // Read stored CRC
+
+		var len int
+		if read_section == 1 {
+			len = read_com_len
+		} else {
+			len = read_com_len + aesgcm_block_additional
+		}
+		content := make([]byte, len)
+
+		if n, err := file_reader.Read(content); err != nil || n < len {
+			return fmt.Errorf("unexpected end of file: %s", err)
+		}
+
+		if read_section != 1 {
+			// Decryption
+			content, err = getDisk2MemAES256GCMblock(content, header)
+			if err != nil {
+				return err
 			}
+			// Note that AES GCM also removes its 12 + 16 bytes of overhead
+		}
+
+		// Decompressing, if compressed
+		if read_com_len < read_unc_len {
+			content, err = getDisk2MemBzip2block(content)
+			if err != nil {
+				return err
+			}
+		}
+
+		// Calculate our own CRC, to compare against the stored one
+		header_crc := crc32.ChecksumIEEE(content)
+		if read_crc != header_crc {
+			return fmt.Errorf("section CRC mismatch (read 0x%08x, calculated 0x%08x), Haystack corrupted?",
+				read_crc, header_crc)
 		}
 
 		switch read_section {
@@ -143,10 +179,9 @@ trailer:
 			if prev_section != section_header && prev_section != section_haybale {
 				return fmt.Errorf("Dictionary section can only follow a Header or Haybale")
 			}
-			if err := p.getDisk2MemDictionary(content, first_dictionary); err != nil {
+			if err := p.getDisk2MemDictionary(content); err != nil {
 				return err
 			}
-			first_dictionary = false
 
 		case section_haybale:
 			if prev_section != section_dictionary {
@@ -160,7 +195,7 @@ trailer:
 			break trailer // Trailer section, break out of our loop. So ignore any garbage after that.
 
 		default:
-			return fmt.Errorf("unknown section type %d, not an OpenActa file or file corrupt?", read_section)
+			return fmt.Errorf("unknown section type %d, not a Haystack or dataset corrupt?", read_section)
 		}
 
 		prev_section = int(read_section)
@@ -171,22 +206,33 @@ trailer:
 
 // Process Header content
 func (p *Haystack) getDisk2MemHeader(content []byte) error {
+	fmt.Fprintf(os.Stderr, "getDisk2MemHeader\n") // DEBUG
+
 	reader := bytes.NewReader(content)
+
 	read_version_major := getByteFromData(reader)
 	read_version_minor := getByteFromData(reader)
 
 	// If/Once there are multiple versions or formats, we can implement appropriate handling
 	// rather than just refusing. We want to be at least backwards compatible.
 	if read_version_major != version_major || read_version_minor != version_minor {
-		return fmt.Errorf("stored version of file (%d.%d) incompatible with this server (%d.%d)",
+		return fmt.Errorf("stored version of Haystack (%d.%d) incompatible with this server (%d.%d)",
 			read_version_major, read_version_minor, version_major, version_minor)
+	}
+
+	// Read back UUID (in binary form) of AES key
+	uuid_binary := make([]byte, 16) // 16 bytes
+	for i := 0; i < len(uuid_binary); i++ {
+		uuid_binary[i] = getByteFromData(reader)
 	}
 
 	return nil
 }
 
 // Process Dictionary content
-func (p *Haystack) getDisk2MemDictionary(content []byte, first_dictionary bool) error {
+func (p *Haystack) getDisk2MemDictionary(content []byte) error {
+	fmt.Fprintf(os.Stderr, "getDisk2MemDictionary\n") // DEBUG
+
 	reader := bytes.NewReader(content)
 
 	if reader.Len() < min_DiskDictHeaderLen {
@@ -212,7 +258,7 @@ func (p *Haystack) getDisk2MemDictionary(content []byte, first_dictionary bool) 
 		//fmt.Fprintf(os.Stderr, "dkey[%d]=%-10s\r", dkey, *key) // DEBUG
 
 		// Put key in our own hash table. Same location as original.
-		// Exact same 24-bit (16M) range. Also, we use ptr to string
+		// Exact same 24-bit (min_DiskDictHeaderLen) range. Also, we use ptr to string
 		p.Dict.dkey[dkey] = key
 	}
 
@@ -221,6 +267,8 @@ func (p *Haystack) getDisk2MemDictionary(content []byte, first_dictionary bool) 
 
 // Process Haybale content
 func (p *Haystack) getDisk2MemHaybale(content []byte) error {
+	fmt.Fprintf(os.Stderr, "getDisk2MemHaybale\n") // DEBUG
+
 	if len(content) == 0 { // do we need to bother?
 		return nil
 	}
@@ -251,7 +299,7 @@ func (p *Haystack) getDisk2MemHaybale(content []byte) error {
 
 		newstalk.dkey = uint32(getUintFromData(reader, 3))
 		if p.Dict.dkey[newstalk.dkey] == nil { // DEBUG
-			panic(fmt.Sprintf("Reading back nil referenced dkey %d from disk\n", newstalk.dkey))
+			panic(fmt.Sprintf("Read back nil referenced dkey %d from disk\n", newstalk.dkey))
 		}
 
 		read_valtype := uint8(getUintFromData(reader, 1))
@@ -301,10 +349,10 @@ func (p *Haystack) getDisk2MemHaybale(content []byte) error {
 }
 
 // bzip2's signatures are HSB (highest significant byte) first
-func bzip2_check_sig(dataslice []byte, len int, sigseq uint64) bool {
+func bzip2_check_sig(dataslice []byte, sigseq uint64) bool {
 	var res uint64
 
-	for i := 0; i < len; i++ {
+	for i := 0; i < len(dataslice); i++ {
 		res <<= 8
 		res |= uint64(dataslice[i])
 	}
@@ -312,18 +360,89 @@ func bzip2_check_sig(dataslice []byte, len int, sigseq uint64) bool {
 	return res == sigseq
 }
 
+// Process bzip2 -9 content
+func getDisk2MemBzip2block(data []byte) ([]byte, error) {
+	fmt.Fprintf(os.Stderr, "getDisk2MemBzip2block\n") // DEBUG
+
+	// check for bzip2 file and block signatures
+	if !bzip2_check_sig(data[0:2], bzip2_hdrMagic) ||
+		!bzip2_check_sig(data[4:10], bzip2_blkMagic) {
+		// If no signatures, presume not compressed...
+		// In the worst case, it'll fail CRC check. Good.
+		return data, nil
+	}
+
+	// It's a bzip2 compressed block: decompress our data!
+	var bzip2_config bzip2.ReaderConfig
+
+	if reader, err := bzip2.NewReader(bytes.NewReader(data), &bzip2_config); err != nil {
+		return nil, fmt.Errorf("error decompressing bzip2: %v", err)
+	} else if buf, err := io.ReadAll(reader); err != nil {
+		return nil, fmt.Errorf("error decompressing bzip2: %v", err)
+	} else if reader.OutputOffset > max_filesize {
+		return nil, fmt.Errorf("dataset too long, not a Haystack?")
+	} else {
+		reader.Close()
+
+		// assign decompressed data so we can process it
+		data = buf
+	}
+
+	return data, nil
+}
+
+// Process AES256-GCM content
+func getDisk2MemAES256GCMblock(data []byte, extra []byte) ([]byte, error) {
+	fmt.Fprintf(os.Stderr, "Process AES256+GCM (extra=%v)\n", extra) // DEBUG
+
+	// Convert printable AES key string back to binary sequence we can use
+	key, err := base64.StdEncoding.DecodeString(aes_test_key)
+	if err != nil {
+		return nil, fmt.Errorf("error decoding base64 encoded AES key: %s", err)
+	}
+
+	// Create a new AES cipher block using the raw key
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, fmt.Errorf("error initialising AES cipher: %s", err)
+	}
+
+	// Create a new GCM cipher mode using the AES cipher block
+	aesgcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, fmt.Errorf("error initialising GCM cipher mode: %s", err)
+	}
+
+	// Read the nonce back
+	nonce := data[0:aesgcm.NonceSize()]
+	data = data[aesgcm.NonceSize():]
+
+	// cleartext is slightly shorter than ciphertext, so this is ok.
+	// It's just about efficiency anyway, nothing bad is going to happen.
+	var plaintext = make([]byte, 0, len(data))
+
+	plaintext, err = aesgcm.Open(nil, nonce, data, extra)
+	if err != nil {
+		return nil, fmt.Errorf("error decrypting Haystack: %s", err)
+	}
+
+	return plaintext, nil
+}
+
 // Process byte slice into complete Haystack structure
 // We check the wazoo out of this!
 func (p *Haystack) Disk2Mem(data []byte) error {
+	fmt.Fprintf(os.Stderr, "Disk2Mem\n") // DEBUG
+
 	len := len(data)
 
 	// First check some general file stuff
 	if len < min_filesize {
-		return fmt.Errorf("file too short, not an OpenActa file?")
+		return fmt.Errorf("dataset too short, not a Haystack?")
 	}
 
 	if len > max_filesize {
-		return fmt.Errorf("file too long, not an OpenActa file?")
+		return fmt.Errorf("dataset too long, not a Haystack?")
 	}
 
 	// TODO: decrypt
