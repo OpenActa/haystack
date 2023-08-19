@@ -39,6 +39,7 @@ import (
 	"os"
 
 	"github.com/dsnet/compress/bzip2"
+	"github.com/google/uuid"
 )
 
 // Read a byte
@@ -221,9 +222,17 @@ func (p *Haystack) getDisk2MemHeader(content []byte) error {
 	}
 
 	// Read back UUID (in binary form) of AES key
-	uuid_binary := make([]byte, 16) // 16 bytes
-	for i := 0; i < len(uuid_binary); i++ {
-		uuid_binary[i] = getByteFromData(reader)
+  uuid_bytes := make([]byte, 16) // 16 bytes
+	for i := 0; i < len(uuid_bytes); i++ {
+		uuid_bytes[i] = getByteFromData(reader)
+	}
+	uuid_raw, err := uuid.FromBytes(uuid_bytes)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Fprintf(os.Stderr, "File AES used key uuid %s\n", uuid_raw.String()) // DEBUG
+	if uuid_raw.String() != aes_test_uuid {
+		return fmt.Errorf("file was encrypted with different (unknown) AES key")
 	}
 
 	return nil

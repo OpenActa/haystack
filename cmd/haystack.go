@@ -142,8 +142,9 @@ func main() {
 				data, sha512block, _ := hs.Mem2Disk() // also returns error
 				duration := time.Since(start)
 				fmt.Fprintf(os.Stderr, "Mem2Disk() duration: %v\n", duration)
-				_ = sha512block
 				os.WriteFile(fname, data, 0600)
+				sha512hs_fname := fname + ".sha512hs"
+				os.WriteFile(sha512hs_fname, sha512block, 0600)
 
 				action = true
 			} else {

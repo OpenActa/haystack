@@ -214,10 +214,9 @@ func mem2DiskSHA512block(dataset []byte, time_first int64, time_last int64) ([]b
 		return nil, err
 	}
 
-	data = append(data, hdr...)
 	data = append(data, *encrypted_content...) // we can glue it all together
 
-	return data, nil
+	return append(hdr, data...), nil
 }
 
 // Assemble disk structure for the Haystack header
@@ -276,7 +275,7 @@ func mem2DiskFileTrailer(last_dict_ofs uint32, time_first int64, time_last int64
 		return nil, err
 	}
 
-	data = append(data, *encrypted_content...) // we can glue it all together
+  data = append(data, *encrypted_content...) // we can glue it all together
 
 	return data, nil
 }
