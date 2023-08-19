@@ -222,7 +222,7 @@ func (p *Haystack) getDisk2MemHeader(content []byte) error {
 	}
 
 	// Read back UUID (in binary form) of AES key
-	uuid_bytes := make([]byte, 16) // 16 bytes
+  uuid_bytes := make([]byte, 16) // 16 bytes
 	for i := 0; i < len(uuid_bytes); i++ {
 		uuid_bytes[i] = getByteFromData(reader)
 	}
@@ -452,27 +452,6 @@ func (p *Haystack) Disk2Mem(data []byte) error {
 
 	if len > max_filesize {
 		return fmt.Errorf("dataset too long, not a Haystack?")
-	}
-
-	// TODO: decrypt
-
-	// check for bzip2 file and block signatures
-	if bzip2_check_sig(data, 2, bzip2_hdrMagic) &&
-		bzip2_check_sig(data[4:], 6, bzip2_blkMagic) {
-		// it's a bzip2 compressed file: decompress our data!
-		var bzip2_config bzip2.ReaderConfig
-		if reader, err := bzip2.NewReader(bytes.NewReader(data), &bzip2_config); err != nil {
-			return fmt.Errorf("error decompressing bzip2 OpenActa file")
-		} else if buf, err := io.ReadAll(reader); err != nil {
-			return fmt.Errorf("error decompressing bzip2 OpenActa file")
-		} else if reader.OutputOffset > max_filesize {
-			return fmt.Errorf("file too long, not an OpenActa file?")
-		} else {
-			reader.Close()
-
-			// assign decompressed data so we can process it
-			data = buf
-		}
 	}
 
 	// Now dive into the file's content

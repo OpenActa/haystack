@@ -275,7 +275,7 @@ func mem2DiskFileTrailer(last_dict_ofs uint32, time_first int64, time_last int64
 		return nil, err
 	}
 
-	data = append(data, *encrypted_content...) // we can glue it all together
+  data = append(data, *encrypted_content...) // we can glue it all together
 
 	return data, nil
 }
