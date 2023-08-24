@@ -26,12 +26,24 @@ const (
 	Timestamp_key    = "_timestamp"      // Timestamp key string
 	haystalk_ofs_nil = 0xffffffff        // used for nil, last
 	cap_initial      = 100000            // Size of initial haystalk slice allocation
+
+	// outer bounds of config variables
+	haystack_wait_maxsize_lower = 64 * 1024 * 1024   // 64M
+	haystack_wait_maxsize_upper = 1024 * 1024 * 1024 // 1G
+	haybale_wait_minsize_lower  = 0
+	haybale_wait_minsize_upper  = 256 * 1024 * 1024 // 256M
+	haybale_wait_maxtime_lower  = 0
+	haybale_wait_maxtime_upper  = 6 * 3600 // 6 hrs
+	compression_level_lower     = 0        // lowest (fast) compression
+	compression_level_upper     = 9        // highest (slower) compression
 )
 
 type Haystack struct {
 	Dict Dictionary
 
 	Haybale []*Haybale // Array of pointers to Haybale record (time slices)
+
+	aes_key_uuid string // UUID of AES key used to encrypt this Haystack on disk
 
 	// needed to keep track of our in-mem and on-disk size
 	memsize uint32
@@ -41,6 +53,8 @@ type Dictionary struct {
 	num_dkeys uint32                  // How many keys do we use (used in mem2disk)
 	dkey      [hashtable_size]*string // 24-bit hash table (16MB)
 	dirty     [hashtable_size]bool    // Save to disk with next Haybale (record)
+
+	HaystackPtr *Haystack // ptr ref back to Haystack (for AES key)
 }
 
 type Haybale struct {
@@ -59,6 +73,8 @@ type Haybale struct {
 
 	// needed to keep track of our in-mem and on-disk size
 	Memsize uint32
+
+	HaystackPtr *Haystack // ptr ref back to Haystack (for AES key)
 }
 
 type Haystalk struct {
@@ -68,10 +84,6 @@ type Haystalk struct {
 	self_ofs  uint32 // Pointer to self. Used during sort.
 	first_ofs uint32 // offset to first (_timestamp) in Haystalk (self for first)
 	next_ofs  uint32 // offset to next in Haystalk (0xffffffff for last)
-}
-
-type ValType interface {
-	int64 | float64 | *string
 }
 
 type Val struct {

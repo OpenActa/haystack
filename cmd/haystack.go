@@ -23,6 +23,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/spf13/viper"
 	"openacta.dev/haystack"
 )
 
@@ -38,6 +39,31 @@ func main() {
 
 	var action bool
 	var curarg int
+
+	viper.SetConfigFile("./testdata/haystack.conf")
+	viper.SetConfigType("ini")
+	if err := viper.ReadInConfig(); err != nil {
+		fmt.Fprintf(os.Stderr, "Error reading configuration")
+		os.Exit(1)
+	}
+
+	errors := haystack.ConfigureVariables()
+	if errors > 0 {
+		fmt.Fprintf(os.Stderr, "%d errors reading Haystack configuration\n", errors)
+		os.Exit(1)
+	}
+
+	errors = haystack.ValidateConfiguration()
+	if errors > 0 {
+		fmt.Fprintf(os.Stderr, "%d errors validating Haystack configuration\n", errors)
+		os.Exit(1)
+	}
+
+	errors = haystack.ConfigureAESKeyStore()
+	if errors > 0 {
+		fmt.Fprintf(os.Stderr, "%d errors initialising Haystack subsystem\n", errors)
+		os.Exit(1)
+	}
 
 	for curarg = 1; curarg < len(os.Args); curarg++ {
 		switch os.Args[curarg] {
@@ -63,6 +89,7 @@ func main() {
 				start := time.Now()
 
 				cur_hb := new(haystack.Haybale)
+				cur_hb.HaystackPtr = &hs
 				hs.Haybale = append(hs.Haybale, cur_hb)
 
 				// Iterate over each line in the file
@@ -76,6 +103,7 @@ func main() {
 
 						hs.Haybale = append(hs.Haybale, new_hb)
 						cur_hb = new_hb
+						cur_hb.HaystackPtr = &hs
 					}
 					flat, res := haystack.JSONToKVmap([]byte(line))
 					_ = res
@@ -142,9 +170,9 @@ func main() {
 				data, sha512block, _ := hs.Mem2Disk() // also returns error
 				duration := time.Since(start)
 				fmt.Fprintf(os.Stderr, "Mem2Disk() duration: %v\n", duration)
-				os.WriteFile(fname, data, 0600)
+				os.WriteFile(fname, data, haystack.NewFilePermissions)
 				sha512hs_fname := fname + ".sha512hs"
-				os.WriteFile(sha512hs_fname, sha512block, 0600)
+				os.WriteFile(sha512hs_fname, sha512block, haystack.NewFilePermissions)
 
 				action = true
 			} else {

@@ -36,12 +36,12 @@ const (
 
 	sha512_byte_len = 64 // SHA-512
 
-	AES_key_byte_len        = 32                         // AES256
-	aesgcm_nonce_byte_len   = 12                         // AES nonce is 92 bits
-	aesgcm_block_additional = aesgcm_nonce_byte_len + 16 // + AES GCM overhead
+	AES_key_byte_len        = (256 / 8)                    // AES256
+	aesgcm_nonce_byte_len   = 12                           // AES nonce is 92 bits
+	aesgcm_block_additional = (aesgcm_nonce_byte_len + 16) // + AES GCM overhead
 
-	aes_test_uuid = "f9800d09-2a20-4ffe-8916-748783c1ea0a"
-	aes_test_key  = "5/QerSN8LrWRPkLoge4IfYT/Iv8X4GjQC3njnW6MlzU="
+	NewFilePermissions = 0660 // Permissions for new files
+	NewDirPermissions  = 0770 // Permissions for new directories
 )
 
 /*

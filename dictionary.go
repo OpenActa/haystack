@@ -1,4 +1,4 @@
-// OpenActa/Haystack Dictionary
+// OpenActa/Haystack - Dictionary
 // Copyright (C) 2023 Arjen Lentz & Lentz Pty Ltd; All Rights Reserved
 // <arjen (at) openacta (dot) dev>
 

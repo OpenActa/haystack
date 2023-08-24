@@ -26,8 +26,7 @@ package haystack
 
 import (
 	"fmt"
-	"os"
-	"runtime"
+	"log"
 	"sort"
 	"strconv"
 	"time"
@@ -83,22 +82,21 @@ func (p *Haybale) insertStalk(d *Dictionary, k string, v string) uint32 {
 
 	// Finally, insert at the correct position
 	pos := p.num_haystalks
+	newstalk.self_ofs = pos // This is used during sorting
 	p.haystalk[pos] = &newstalk
 	p.num_haystalks++
 	p.is_sorted_immutable = false // This append makes the Haybale not sorted
 
-	newstalk.self_ofs = pos // This is used during sorting
-
 	return pos
 }
 
-// Insert a bunch (aka a "row") of KV entries
+// Insert a bunch (aka a "record") of KV entries
 func (p *Haybale) InsertBunch(d *Dictionary, flatmap map[string]interface{}) {
 	var first, prev uint32
 
 	if p.is_sorted_immutable {
 		// We can't break this haybale from being immutable
-		fmt.Fprintf(os.Stderr, "Cannot insert to immutable Haybale\n")
+		log.Printf("Cannot insert to immutable Haybale")
 		// TODO: return some error condition
 		return
 	}
@@ -158,16 +156,16 @@ func (p *Haybale) InsertBunch(d *Dictionary, flatmap map[string]interface{}) {
 
 // Sort all haybales
 func (p *Haystack) SortAllBales() {
-	fmt.Fprintf(os.Stderr, "Sorting all (%d) haybale(s)...\n", len(p.Haybale))
+	//log.Printf("Sorting all (%d) haybale(s)...", len(p.Haybale)) // DEBUG
 	// Start the clock
-	start := time.Now()
+	//start := time.Now() // DEBUG
 
 	for i := range p.Haybale {
 		p.Haybale[i].SortBale()
 	}
 
-	duration := time.Since(start)
-	fmt.Fprintf(os.Stderr, "Haybale sort duration: %v\n", duration)
+	//duration := time.Since(start)	// DEBUG
+	//log.Printf("Haybale sort duration: %v", duration)	// DEBUG
 }
 
 // Sort a Haybale, if needed. At this point we also de-dup strings
@@ -176,13 +174,13 @@ func (p *Haybale) SortBale() {
 		return // Nothing to do, is already sorted!
 	}
 
-	fmt.Fprintf(os.Stderr, "Running the Go garbage collector\n")
-	runtime.GC() // Force garbage collector to run all the way, to ensure we measure de-dup cleanly
+	//log.Printf("Running the Go garbage collector")	// DEBUG
+	//runtime.GC() // Force garbage collector to run all the way, to ensure we measure de-dup cleanly
 
-	fmt.Fprintf(os.Stderr, "Haybale sort & de-dup\n")
-	var m runtime.MemStats
-	runtime.ReadMemStats(&m)
-	oldalloc := m.HeapAlloc / (1024 * 1024)
+	// log.Printf("Haybale sort & de-dup") // DEBUG
+	//var m runtime.MemStats
+	//runtime.ReadMemStats(&m)
+	//oldalloc := m.HeapAlloc / (1024 * 1024)
 
 	// Sort: using standard Go lib sorting function for now, with a closure.
 	// If we used our own sorting function, we could take "self_ofs" out and save memory...
@@ -224,7 +222,7 @@ func (p *Haybale) SortBale() {
 				*/
 				p.haystalk[i].val.stringval = prev_string
 				p.Memsize -= uint32(len(*prev_string))
-				//fmt.Fprintf(os.Stderr, "Dedup %s, saved %d bytes\n", *prev_string, len(*prev_string))	// DEBUG
+				//log.Printf("Dedup %s, saved %d bytes", *prev_string, len(*prev_string))	// DEBUG
 			} else {
 				prev_string = p.haystalk[i].val.stringval
 			}
@@ -234,12 +232,12 @@ func (p *Haybale) SortBale() {
 
 	p.is_sorted_immutable = true // Says that this haybale is sorted
 
-	runtime.GC() // Force garbage collector to run all the way, to measure what the de-dup accomplishes
-	runtime.ReadMemStats(&m)
-	newalloc := m.HeapAlloc / (1024 * 1024)
-	totalalloc := m.TotalAlloc / (1024 * 1024)
-	fmt.Fprintf(os.Stderr, "num_haystalks = %v, Heap was=%dM, now=%dM (%.02f%% gain), TotalAlloc=%dM\n",
-		p.num_haystalks, oldalloc, newalloc, 100.0-((float32(newalloc)/float32(oldalloc))*100.0), totalalloc)
+	//runtime.GC() // Force garbage collector to run all the way, to measure what the de-dup accomplishes
+	//runtime.ReadMemStats(&m)
+	//newalloc := m.HeapAlloc / (1024 * 1024)
+	//totalalloc := m.TotalAlloc / (1024 * 1024)
+	//log.Printf("num_haystalks = %v, Heap was=%dM, now=%dM (%.02f%% gain), TotalAlloc=%dM",	// DEBUG
+	//	p.num_haystalks, oldalloc, newalloc, 100.0-((float32(newalloc)/float32(oldalloc))*100.0), totalalloc)
 }
 
 // EOF

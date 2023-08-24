@@ -1,4 +1,4 @@
-// OpenActa/Haystack test/debug functions
+// OpenActa/Haystack - test/debug functions
 // Copyright (C) 2023 Arjen Lentz & Lentz Pty Ltd; All Rights Reserved
 // <arjen (at) openacta (dot) dev>
 
@@ -19,7 +19,7 @@ package haystack
 
 import (
 	"fmt"
-	"os"
+	"log"
 )
 
 // Print Haybale (TEST/DEBUG purposes)
@@ -33,7 +33,7 @@ func (p *Haybale) PrintBale(d *Dictionary) {
 
 		for r := p.haystalk[n].first_ofs; r != haystalk_ofs_nil; r = p.haystalk[r].next_ofs {
 			if d.dkey[(*p.haystalk[r]).dkey] == nil { // DEBUG
-				fmt.Fprintf(os.Stderr, "Assert: nil ptr from dkey %v\n", (*p.haystalk[r]).dkey)
+				log.Printf("Assert: nil ptr from dkey %v\n", (*p.haystalk[r]).dkey)
 				continue
 			}
 			fmt.Printf("%v=", *d.dkey[(*p.haystalk[r]).dkey])

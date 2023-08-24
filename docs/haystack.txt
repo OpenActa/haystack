@@ -27,7 +27,7 @@ confuse the system with other (different) database environments.
 
 Characteristics
     - Time-based Key-value store (non-unique)
-    - Linked haystack stalks (tuples) make up bales (rows)
+    - Linked haystack stalks (tuples) make up bales (records)
     - WORM (write-once, read-many) - no updates/deletes possible
     - Keys referenced via hash based Dictionary for efficiency
     - Sorted array of entries in Haybale (enabling binary search)
@@ -86,7 +86,7 @@ Merge Trees (LSM Trees) or mutability (update/delete), so that integrity of the
 log data is always retained. Thus, Haystalks also do not contain "tombstones"
 (indicator that data is obsolete).
 
-Haystalks are interlinked in Bunches to create "rows", while retaining the
+Haystalks are interlinked in Bunches to create "records", while retaining the
 unique ability to directly and efficiently search across all "fields".
 The system always makes _timestamp the first field in a bunch, also generating
 such a field if one does not already exist. _timestamp is always in UTC.
