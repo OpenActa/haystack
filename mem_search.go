@@ -80,7 +80,7 @@ func (p *Haystack) SearchKeyValArray(kv_array map[string]string) {
 		// Check in each Haybale
 		stalks := int(cur_hb.num_haystalks)
 
-		log.Printf("Looking in Haybale %d (%d stalks)", i, stalks)
+		//log.Printf("Looking in Haybale %d (%d stalks)", i, stalks)	// DEBUG
 
 		/*
 			We do a binary search within the Haybale.
@@ -193,7 +193,7 @@ func (p *Haystack) SearchKeyVal(ks string, v string) {
 		// Check in each Haybale
 		stalks := int(cur_hb.num_haystalks)
 
-		log.Printf("Looking in Haybale %d (%d stalks)", i, stalks)
+		//log.Printf("Looking in Haybale %d (%d stalks)", i, stalks)	// DEBUG
 
 		/*
 			We do a binary search within the Haybale.

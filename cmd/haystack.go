@@ -20,6 +20,7 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"log"
 	"os"
 	"time"
 
@@ -30,10 +31,9 @@ import (
 var hs haystack.Haystack // New Haystack
 
 func main() {
-	fmt.Fprintln(os.Stderr, "Haystack - Haystack log management system test & benchmark tool")
-	fmt.Fprintln(os.Stderr, "Copyright (C) 2023 Arjen Lentz & Lentz Pty Ltd; All Rights Reserved")
-	fmt.Fprintln(os.Stderr, "Licenced under the Affero General Public Licence (AGPL) v3(+)")
-	fmt.Fprintln(os.Stderr)
+	log.Println("Haystack - Haystack log management system test & benchmark tool")
+	log.Println("Copyright (C) 2023 Arjen Lentz & Lentz Pty Ltd; All Rights Reserved")
+	log.Println("Licenced under the Affero General Public Licence (AGPL) v3(+)")
 
 	hs.Haybale = make([]*haystack.Haybale, 0)
 
@@ -43,25 +43,25 @@ func main() {
 	viper.SetConfigFile("./testdata/haystack.conf")
 	viper.SetConfigType("ini")
 	if err := viper.ReadInConfig(); err != nil {
-		fmt.Fprintf(os.Stderr, "Error reading configuration")
+		log.Printf("Error reading configuration")
 		os.Exit(1)
 	}
 
 	errors := haystack.ConfigureVariables()
 	if errors > 0 {
-		fmt.Fprintf(os.Stderr, "%d errors reading Haystack configuration\n", errors)
+		log.Printf("%d errors reading Haystack configuration", errors)
 		os.Exit(1)
 	}
 
 	errors = haystack.ValidateConfiguration()
 	if errors > 0 {
-		fmt.Fprintf(os.Stderr, "%d errors validating Haystack configuration\n", errors)
+		log.Printf("%d errors validating Haystack configuration", errors)
 		os.Exit(1)
 	}
 
 	errors = haystack.ConfigureAESKeyStore()
 	if errors > 0 {
-		fmt.Fprintf(os.Stderr, "%d errors initialising Haystack subsystem\n", errors)
+		log.Printf("%d errors initialising Haystack subsystem", errors)
 		os.Exit(1)
 	}
 
@@ -73,7 +73,7 @@ func main() {
 				curarg++
 				fname := os.Args[curarg]
 
-				fmt.Fprintf(os.Stderr, "Ingesting file '%s'\n", fname)
+				log.Printf("Ingesting file '%s'", fname)
 				// Open the file for reading
 				file, err := os.Open(fname)
 				if err != nil {
@@ -110,12 +110,12 @@ func main() {
 
 					cur_hb.InsertBunch(&hs.Dict, flat)
 					if (i % 1000) == 0 {
-						fmt.Fprintf(os.Stderr, "%d000 lines\r", i/1000)
+						log.Printf("%d000 lines\r", i/1000)
 					}
 				}
 
 				duration := time.Since(start)
-				fmt.Fprintf(os.Stderr, "Inserted %d JSON lines, duration: %v\n", i, duration)
+				log.Printf("Inserted %d JSON lines, duration: %v", i, duration)
 
 				// Check for any errors that may have occurred during scanning
 				if err := scanner.Err(); err != nil {
@@ -125,7 +125,7 @@ func main() {
 
 				action = true
 			} else {
-				fmt.Fprintf(os.Stderr, "Missing option for -i (requires a filename)\n")
+				log.Printf("Missing option for -i (requires a filename)")
 			}
 
 		case "-p":
@@ -145,7 +145,7 @@ func main() {
 					curarg += 2
 				}
 			} else {
-				fmt.Fprintf(os.Stderr, "Missing options for -kv (requires a key and a value)\n")
+				log.Printf("Missing options for -kv (requires a key and a value)")
 				break
 			}
 
@@ -163,20 +163,20 @@ func main() {
 			if curarg+1 < len(os.Args) {
 				curarg++
 				fname := os.Args[curarg]
-				fmt.Fprintf(os.Stderr, "Writing Haystack file '%s'\n", fname)
+				log.Printf("Writing Haystack file '%s'", fname)
 
 				// Start the clock
 				start := time.Now()
 				data, sha512block, _ := hs.Mem2Disk() // also returns error
 				duration := time.Since(start)
-				fmt.Fprintf(os.Stderr, "Mem2Disk() duration: %v\n", duration)
+				log.Printf("Mem2Disk() duration: %v", duration)
 				os.WriteFile(fname, data, haystack.NewFilePermissions)
 				sha512hs_fname := fname + ".sha512hs"
 				os.WriteFile(sha512hs_fname, sha512block, haystack.NewFilePermissions)
 
 				action = true
 			} else {
-				fmt.Fprintf(os.Stderr, "Missing option for -w (requires a filename)\n")
+				log.Printf("Missing option for -w (requires a filename)")
 			}
 
 			action = true
@@ -185,33 +185,33 @@ func main() {
 			if curarg+1 < len(os.Args) {
 				curarg++
 				fname := os.Args[curarg]
-				fmt.Fprintf(os.Stderr, "Reading Haystack file '%s'\n", fname)
+				log.Printf("Reading Haystack file '%s'", fname)
 
 				if data, err := os.ReadFile(fname); err != nil {
-					fmt.Fprintf(os.Stderr, "Error reading Haystack file %s: %v\n", fname, err)
+					log.Printf("Error reading Haystack file %s: %v", fname, err)
 				} else {
 					// Start the clock
 					start := time.Now()
 					if err := hs.Disk2Mem(data); err != nil {
-						fmt.Fprintf(os.Stderr, "Reading Haystack file %s: %v\n", fname, err)
+						log.Printf("Reading Haystack file %s: %v", fname, err)
 					}
 					duration := time.Since(start)
-					fmt.Fprintf(os.Stderr, "Disk2Mem() duration: %v\n", duration)
+					log.Printf("Disk2Mem() duration: %v", duration)
 				}
 				action = true
 			} else {
-				fmt.Fprintf(os.Stderr, "Missing option for -r (requires a filename)\n")
+				log.Printf("Missing option for -r (requires a filename)")
 			}
 		}
 	}
 
 	if !action {
-		fmt.Fprintf(os.Stderr, "Usage: %s ...\n", os.Args[0])
-		fmt.Fprintf(os.Stderr, " -i <file>            Ingest JSON from <file> to mem\n")
-		fmt.Fprintf(os.Stderr, " -w <file>            Write mem to Haystack <file>\n")
-		fmt.Fprintf(os.Stderr, " -r <file>            Read Haystack <file> into mem\n")
-		fmt.Fprintf(os.Stderr, " -p                   Print mem to stdout\n")
-		fmt.Fprintf(os.Stderr, " -kv <key> <val> ...  Search for <key> <value> pair(s) in mem\n")
+		log.Printf("Usage: %s ...", os.Args[0])
+		log.Printf(" -i <file>            Ingest JSON from <file> to mem")
+		log.Printf(" -w <file>            Write mem to Haystack <file>")
+		log.Printf(" -r <file>            Read Haystack <file> into mem")
+		log.Printf(" -p                   Print mem to stdout")
+		log.Printf(" -kv <key> <val> ...  Search for <key> <value> pair(s) in mem")
 	}
 }
 

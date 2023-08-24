@@ -30,6 +30,13 @@ import (
 	"github.com/spf13/viper"
 )
 
+/*
+	Configurable options for the Haystack component go here.
+	Everything else is set, or automatic/dynamic.
+
+	From [haystack] section in /etc/openacta/openacta.conf
+*/
+
 type Haystack_Config struct {
 	user                      string
 	uid                       uint32
@@ -42,6 +49,7 @@ type Haystack_Config struct {
 	aes_keystore_current_uuid string            // last uuid from keystore_list
 	haystack_wait_maxsize     uint32
 	haybale_wait_minsize      uint32
+	haybale_wait_mintime      uint32
 	haybale_wait_maxtime      uint32
 	compression_level         uint32
 }
@@ -63,6 +71,7 @@ func config_set_defaults() {
 
 	config.haystack_wait_maxsize = 128 * 1024 * 1024 // 128M
 	config.haybale_wait_minsize = 16 * 1024 * 1024   // 16M
+	config.haybale_wait_mintime = 300                // 5 minutes
 	config.haybale_wait_maxtime = 300                // 5 minutes
 
 	config.compression_level = 9 // highest (slower)
@@ -81,6 +90,7 @@ func ConfigureVariables() int {
 
 	errors += config_parse_size(&config.haystack_wait_maxsize, "haystack.haystack_wait_maxsize", haystack_wait_maxsize_lower, haystack_wait_maxsize_upper)
 	errors += config_parse_size(&config.haybale_wait_minsize, "haystack.haybale_wait_minsize", haybale_wait_minsize_lower, haybale_wait_minsize_upper)
+	errors += config_parse_int(&config.haybale_wait_mintime, "haystack.haybale_wait_mintime", haybale_wait_mintime_lower, haybale_wait_mintime_upper)
 	errors += config_parse_int(&config.haybale_wait_maxtime, "haystack.haybale_wait_maxtime", haybale_wait_maxtime_lower, haybale_wait_maxtime_upper)
 
 	errors += config_parse_int(&config.compression_level, "haystack.compression_level", compression_level_lower, compression_level_upper)
