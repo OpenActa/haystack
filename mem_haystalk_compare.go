@@ -25,7 +25,7 @@ import (
 // Compare dkey,valtype,val (hv) with a stored Haystalk
 func (p *Haystalk) Compare(hv Haystalk) int {
 	// Check dkey
-	//fmt.Fprintf(os.Stderr, "Comparing dkey %d | %d\n", p.dkey, hv.dkey) // DEBUG
+	//log.Printf("Comparing dkey %d | %d\n", p.dkey, hv.dkey) // DEBUG
 	if p.dkey > hv.dkey {
 		return 1
 	} else if p.dkey < hv.dkey {
@@ -34,7 +34,7 @@ func (p *Haystalk) Compare(hv Haystalk) int {
 	// same dkey
 
 	// Check value type
-	//fmt.Fprintf(os.Stderr, "Comparing valtype %d | %d\n", p.val.valtype, hv.val.valtype) // DEBUG
+	//log.Printf("Comparing valtype %d | %d\n", p.val.valtype, hv.val.valtype) // DEBUG
 	if p.val.valtype > hv.val.valtype {
 		return 1
 	} else if p.val.valtype < hv.val.valtype {
@@ -67,7 +67,7 @@ func (p *Haystalk) Compare(hv Haystalk) int {
 	case valtype_string:
 		sv1 := *p.val.GetString()
 		sv2 := *hv.val.GetString()
-		//fmt.Fprintf(os.Stderr, "Comparing string %s | %s\n", sv1, sv2) // DEBUG
+		//log.Printf("Comparing string %s | %s\n", sv1, sv2) // DEBUG
 
 		// Check for exact UTF-8 match (case-insensitive)
 		// https://pkg.go.dev/strings#EqualFold
@@ -177,7 +177,7 @@ func (p *Haystalk) CompareString(s *string) (int, bool) {
 		// drops out of switch to string compare
 
 	case valtype_string:
-		//fmt.Fprintf(os.Stderr, "Comparing %s | %s\n", *s, *p.val.GetString()) // DEBUG
+		//log.Printf("Comparing %s | %s\n", *s, *p.val.GetString()) // DEBUG
 
 		// Check for exact UTF-8 match (case-insensitive)
 		// https://pkg.go.dev/strings#EqualFold

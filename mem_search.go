@@ -20,7 +20,7 @@ package haystack
 import (
 	"encoding/json"
 	"fmt"
-	"os"
+	"log"
 	"sort"
 	"strconv"
 	"time"
@@ -41,7 +41,7 @@ func (p *Haystack) SearchKeyValArray(kv_array map[string]string) {
 
 		// doesn't exist, and it's an AND construct so we can just bail out
 		if !found {
-			fmt.Fprintf(os.Stderr, "Key '%s' not present in dataset\n", ks)
+			log.Printf("Key '%s' not present in dataset", ks)
 			return
 		}
 
@@ -54,16 +54,16 @@ func (p *Haystack) SearchKeyValArray(kv_array map[string]string) {
 			// Not an int or float format, we'll make it a string then.
 			vs := v // So the compiler allocates a new string
 			new_hv.val.SetString(&vs)
-			//fmt.Fprintf(os.Stderr, "New string = %s\n", *new_hv.val.GetString())	// DEBUG
+			//log.Printf("New string = %s", *new_hv.val.GetString())	// DEBUG
 		}
 
 		hv = append(hv, new_hv)
 	}
 
 	/*
-		fmt.Fprintf(os.Stderr, "Search conditions: hv = %v\n", hv) // DEBUG
+		log.Printf("Search conditions: hv = %v", hv) // DEBUG
 		for i := 0; i < len(hv); i++ {	// The following only works on strings
-			fmt.Fprintf(os.Stderr, "[%d] %s=%s\n", i, *p.Dict.dkey[hv[i].dkey], *hv[i].val.GetString())
+			log.Printf("[%d] %s=%s", i, *p.Dict.dkey[hv[i].dkey], *hv[i].val.GetString())
 		}
 	*/
 
@@ -74,13 +74,13 @@ func (p *Haystack) SearchKeyValArray(kv_array map[string]string) {
 		// Make sure the bale is sorted
 		//cur_hb.SortBale()					// DEBUG - not any more for normal ops
 		if !cur_hb.is_sorted_immutable { // So obviously this should never happen.
-			fmt.Fprintf(os.Stderr, "Haybale %d is not sorted, we can't search that!\n", i) // DEBUG
+			log.Printf("Haybale %d is not sorted, we can't search that!", i) // DEBUG
 		}
 
 		// Check in each Haybale
 		stalks := int(cur_hb.num_haystalks)
 
-		fmt.Fprintf(os.Stderr, "Looking in Haybale %d (%d stalks)\n", i, stalks)
+		log.Printf("Looking in Haybale %d (%d stalks)", i, stalks)
 
 		/*
 			We do a binary search within the Haybale.
@@ -94,7 +94,7 @@ func (p *Haystack) SearchKeyValArray(kv_array map[string]string) {
 		for j := sort.Search(stalks, func(x int) bool {
 			// Since our data is sorted in ascending order, we search with >=
 			res := (*cur_hb.haystalk[x]).Compare(hv[0])
-			//fmt.Fprintf(os.Stderr, "res=%d\n", res) // DEBUG
+			//log.Printf("res=%d", res) // DEBUG
 			if res >= 0 {
 				return true
 			} else {
@@ -103,7 +103,7 @@ func (p *Haystack) SearchKeyValArray(kv_array map[string]string) {
 		}); j < stalks && cur_hb.haystalk[j].Compare(hv[0]) == 0; j++ {
 			// ----
 			if len(hv) > 1 {
-				//fmt.Fprintf(os.Stderr, "Part match: checking additional conditions\n")
+				//log.Printf("Part match: checking additional conditions")
 
 				// Here we check for additional conditions (AND clause style)
 				for k := 1; k < len(hv); k++ { // from 1: 2nd key/val onward
@@ -120,7 +120,7 @@ func (p *Haystack) SearchKeyValArray(kv_array map[string]string) {
 					}
 				}
 			} /* else {
-				//fmt.Fprintf(os.Stderr, "No additional conditions\n")
+				//log.Printf("No additional conditions")
 			}*/
 
 			// ----
@@ -152,21 +152,21 @@ func (p *Haystack) SearchKeyValArray(kv_array map[string]string) {
 	}
 
 	duration := time.Since(start)
-	fmt.Fprintf(os.Stderr, "%d matches, duration: %v\n", matches, duration)
+	log.Printf("%d matches, duration: %v", matches, duration)
 }
 
 func (p *Haystack) SearchKeyVal(ks string, v string) {
 	var matches uint
 	var val Val
 
-	fmt.Fprintf(os.Stderr, "Searching for key %s = %s\n", ks, v)
+	log.Printf("Searching for key %s = %s", ks, v)
 
 	// Start the clock
 	start := time.Now()
 
 	dkey, found := p.Dict.KeyExists(ks)
 	if !found {
-		fmt.Fprintf(os.Stderr, "Key '%s' not present in dataset\n", ks)
+		log.Printf("Key '%s' not present in dataset", ks)
 		return
 	}
 
@@ -193,7 +193,7 @@ func (p *Haystack) SearchKeyVal(ks string, v string) {
 		// Check in each Haybale
 		stalks := int(cur_hb.num_haystalks)
 
-		fmt.Fprintf(os.Stderr, "Looking in Haybale %d (%d stalks)\n", i, stalks)
+		log.Printf("Looking in Haybale %d (%d stalks)", i, stalks)
 
 		/*
 			We do a binary search within the Haybale.
@@ -285,7 +285,7 @@ func (p *Haystack) SearchKeyVal(ks string, v string) {
 	}
 
 	duration := time.Since(start)
-	fmt.Fprintf(os.Stderr, "%d matches, duration: %v\n", matches, duration)
+	log.Printf("%d matches, duration: %v", matches, duration)
 }
 
 // EOF

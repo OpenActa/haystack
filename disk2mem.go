@@ -20,6 +20,7 @@
    Unsurprisingly reading is slightly more finicky than writing the data.
    We need to check CRCs, and other format aspects, to ensure we're not
    reading in or processing garbage. We can't just blow up.
+   Also, decryption and decompression.
    TODO: The code itself needs to be checked/verified (_test coverage)
 
    See doc/haystack.txt and mem2disk.go for reference
@@ -31,12 +32,10 @@ import (
 	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
-	"encoding/base64"
 	"fmt"
 	"hash/crc32"
 	"io"
 	"math"
-	"os"
 
 	"github.com/dsnet/compress/bzip2"
 	"github.com/google/uuid"
@@ -116,7 +115,7 @@ trailer:
 
 		read_section := getByteFromData(hdr_reader) // Get section identifier
 
-		fmt.Fprintf(os.Stderr, "getDisk2MemSections loop (section id: %d)\n", read_section) // DEBUG
+		//log.Printf("getDisk2MemSections loop (section id: %d)", read_section) // DEBUG
 
 		if prev_section == 0 && read_section != section_header {
 			return fmt.Errorf("first section not header, not a Haystack or dataset corrupt?")
@@ -148,7 +147,7 @@ trailer:
 
 		if read_section != 1 {
 			// Decryption
-			content, err = getDisk2MemAES256GCMblock(content, header)
+			content, err = p.getDisk2MemAES256GCMblock(content, header)
 			if err != nil {
 				return err
 			}
@@ -207,7 +206,7 @@ trailer:
 
 // Process Header content
 func (p *Haystack) getDisk2MemHeader(content []byte) error {
-	fmt.Fprintf(os.Stderr, "getDisk2MemHeader\n") // DEBUG
+	//log.Printf("getDisk2MemHeader") // DEBUG
 
 	reader := bytes.NewReader(content)
 
@@ -217,12 +216,12 @@ func (p *Haystack) getDisk2MemHeader(content []byte) error {
 	// If/Once there are multiple versions or formats, we can implement appropriate handling
 	// rather than just refusing. We want to be at least backwards compatible.
 	if read_version_major != version_major || read_version_minor != version_minor {
-		return fmt.Errorf("stored version of Haystack (%d.%d) incompatible with this server (%d.%d)",
+		return fmt.Errorf("stored version of Haystack file (%d.%d) incompatible with this server (%d.%d)",
 			read_version_major, read_version_minor, version_major, version_minor)
 	}
 
 	// Read back UUID (in binary form) of AES key
-  uuid_bytes := make([]byte, 16) // 16 bytes
+	uuid_bytes := make([]byte, 16) // 16 bytes
 	for i := 0; i < len(uuid_bytes); i++ {
 		uuid_bytes[i] = getByteFromData(reader)
 	}
@@ -230,9 +229,10 @@ func (p *Haystack) getDisk2MemHeader(content []byte) error {
 	if err != nil {
 		panic(err)
 	}
-	fmt.Fprintf(os.Stderr, "File AES used key uuid %s\n", uuid_raw.String()) // DEBUG
-	if uuid_raw.String() != aes_test_uuid {
-		return fmt.Errorf("file was encrypted with different (unknown) AES key")
+	p.aes_key_uuid = uuid_raw.String() // convert to string form and store for reference
+	//log.Printf("File AES used key uuid %s", p.aes_key_uuid) // DEBUG
+	if _, exists := config.aes_keystore_array[p.aes_key_uuid]; !exists {
+		return fmt.Errorf("file was encrypted with unknown AES key (uuid: %s)", p.aes_key_uuid)
 	}
 
 	return nil
@@ -240,7 +240,7 @@ func (p *Haystack) getDisk2MemHeader(content []byte) error {
 
 // Process Dictionary content
 func (p *Haystack) getDisk2MemDictionary(content []byte) error {
-	fmt.Fprintf(os.Stderr, "getDisk2MemDictionary\n") // DEBUG
+	//log.Printf("getDisk2MemDictionary") // DEBUG
 
 	reader := bytes.NewReader(content)
 
@@ -252,7 +252,7 @@ func (p *Haystack) getDisk2MemDictionary(content []byte) error {
 	read_num_dkeys := int(getUintFromData(reader, 4)) // reading 4 rather than 3 bytes, just for alignment
 	// No further fields in the dictionary header at this point
 
-	//fmt.Fprintf(os.Stderr, "read_num_dkeys=%d\n", read_num_dkeys) // DEBUG
+	//log.Printf("read_num_dkeys=%d", read_num_dkeys) // DEBUG
 
 	// This one can't be checked, either, because we're not passing the prev_ofs around between calls.
 	_ = read_prev_ofs // not used here (just for recovery purposes)
@@ -264,7 +264,7 @@ func (p *Haystack) getDisk2MemDictionary(content []byte) error {
 	for i := 0; i < read_num_dkeys; i++ {
 		dkey, key := getKeyFromData(reader)
 
-		//fmt.Fprintf(os.Stderr, "dkey[%d]=%-10s\r", dkey, *key) // DEBUG
+		//log.Printf("dkey[%d]=%-10s\r", dkey, *key) // DEBUG
 
 		// Put key in our own hash table. Same location as original.
 		// Exact same 24-bit (min_DiskDictHeaderLen) range. Also, we use ptr to string
@@ -276,7 +276,7 @@ func (p *Haystack) getDisk2MemDictionary(content []byte) error {
 
 // Process Haybale content
 func (p *Haystack) getDisk2MemHaybale(content []byte) error {
-	fmt.Fprintf(os.Stderr, "getDisk2MemHaybale\n") // DEBUG
+	//log.Printf("getDisk2MemHaybale") // DEBUG
 
 	if len(content) == 0 { // do we need to bother?
 		return nil
@@ -371,7 +371,7 @@ func bzip2_check_sig(dataslice []byte, sigseq uint64) bool {
 
 // Process bzip2 -9 content
 func getDisk2MemBzip2block(data []byte) ([]byte, error) {
-	fmt.Fprintf(os.Stderr, "getDisk2MemBzip2block\n") // DEBUG
+	//log.Printf("getDisk2MemBzip2block") // DEBUG
 
 	// check for bzip2 file and block signatures
 	if !bzip2_check_sig(data[0:2], bzip2_hdrMagic) ||
@@ -401,14 +401,13 @@ func getDisk2MemBzip2block(data []byte) ([]byte, error) {
 }
 
 // Process AES256-GCM content
-func getDisk2MemAES256GCMblock(data []byte, extra []byte) ([]byte, error) {
-	fmt.Fprintf(os.Stderr, "Process AES256+GCM (extra=%v)\n", extra) // DEBUG
+func (p *Haystack) getDisk2MemAES256GCMblock(data []byte, extra []byte) ([]byte, error) {
+	//log.Printf("Process AES256+GCM (extra=%v)", extra) // DEBUG
 
-	// Convert printable AES key string back to binary sequence we can use
-	key, err := base64.StdEncoding.DecodeString(aes_test_key)
-	if err != nil {
-		return nil, fmt.Errorf("error decoding base64 encoded AES key: %s", err)
-	}
+	// Grab AES key belonging with uuid for this Haystack
+	// getDisk2MemHeader() has already checked that we have the key for this uuid
+	key := config.aes_keystore_array[p.aes_key_uuid]
+	//log.Printf("AES key = %v", key) // DEBUG
 
 	// Create a new AES cipher block using the raw key
 	block, err := aes.NewCipher(key)
@@ -441,7 +440,7 @@ func getDisk2MemAES256GCMblock(data []byte, extra []byte) ([]byte, error) {
 // Process byte slice into complete Haystack structure
 // We check the wazoo out of this!
 func (p *Haystack) Disk2Mem(data []byte) error {
-	fmt.Fprintf(os.Stderr, "Disk2Mem\n") // DEBUG
+	//log.Printf("Disk2Mem") // DEBUG
 
 	len := len(data)
 

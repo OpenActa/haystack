@@ -17,6 +17,7 @@
 
 /*
    Our in-memory format is different from how we store on disk.
+   Also, on-disk is compressed and encrypted.
    We want to marshall (encode) to an efficient disk format.
 
    See disk_structure.go, and /doc/haystack.txt
@@ -30,13 +31,12 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"crypto/sha512"
-	"encoding/base64"
 	"fmt"
 	"hash/crc32"
 	"io"
 	"math"
-	"os"
 	"strings"
+
 	"github.com/dsnet/compress/bzip2"
 	"github.com/google/uuid"
 )
@@ -120,6 +120,9 @@ func addKeyToData(buf *[]byte, dkey uint32, key *string) error {
 func (p *Haystack) Mem2Disk() ([]byte, []byte, error) {
 	data := make([]byte, 0, 16384) // Set up our byte array, with some initial room to spare
 
+	// Set this Haystack's AES uuid to current configured one.
+	p.aes_key_uuid = config.aes_keystore_current_uuid
+
 	header, err := mem2DiskFileHeader()
 	if err != nil {
 		return nil, nil, err
@@ -136,6 +139,7 @@ func (p *Haystack) Mem2Disk() ([]byte, []byte, error) {
 		// First we write out a Dictionary.
 		// For the first Haybale, prev_ofs will be 0:
 		// that will write out a full Dictionary and append it to our header.
+		p.Dict.HaystackPtr = p
 		if dc, err := p.Dict.Mem2Disk(prev_ofs); err != nil {
 			return nil, nil, err
 		} else {
@@ -160,7 +164,7 @@ func (p *Haystack) Mem2Disk() ([]byte, []byte, error) {
 		}
 	}
 
-	if trailer, err := mem2DiskFileTrailer(prev_ofs, time_first, time_last); err != nil {
+	if trailer, err := p.mem2DiskFileTrailer(prev_ofs, time_first, time_last); err != nil {
 		return nil, nil, err
 	} else {
 		data = append(data, trailer...)
@@ -168,7 +172,7 @@ func (p *Haystack) Mem2Disk() ([]byte, []byte, error) {
 
 	// Generate SHA512 for cryptographic signature, over the entire
 	// compressed+encrypted dataset
-	sha512section, err := mem2DiskSHA512block(data, time_first, time_last)
+	sha512section, err := p.mem2DiskSHA512block(data, time_first, time_last)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -176,7 +180,7 @@ func (p *Haystack) Mem2Disk() ([]byte, []byte, error) {
 	return data, sha512section, nil
 }
 
-func mem2DiskSHA512block(dataset []byte, time_first int64, time_last int64) ([]byte, error) {
+func (p *Haystack) mem2DiskSHA512block(dataset []byte, time_first int64, time_last int64) ([]byte, error) {
 	var data = make([]byte, 0, 16384)
 	var content = make([]byte, 0, 16384)
 
@@ -209,7 +213,7 @@ func mem2DiskSHA512block(dataset []byte, time_first int64, time_last int64) ([]b
 	addMultibyteToData(&data, uint64(crc), 4) // append CRC
 
 	// Encryption
-	encrypted_content, err := mem2DiskAES256GCMblock(&content, data)
+	encrypted_content, err := mem2DiskAES256GCMblock(&content, data, p.aes_key_uuid)
 	if err != nil {
 		return nil, err
 	}
@@ -227,9 +231,9 @@ func mem2DiskFileHeader() ([]byte, error) {
 	addByteToData(&content, version_major)
 	addByteToData(&content, version_minor)
 
-	uuid, _ := uuid.Parse(aes_test_uuid)    // grab AES uuid
-	uuid_binary, _ := uuid.MarshalBinary()  // get it out in binary
-	for i := 0; i < len(uuid_binary); i++ { // 16 bytes
+	uuid, _ := uuid.Parse(config.aes_keystore_current_uuid) // grab current AES uuid
+	uuid_binary, _ := uuid.MarshalBinary()                  // get it out in binary
+	for i := 0; i < len(uuid_binary); i++ {                 // 16 bytes
 		addByteToData(&content, uuid_binary[i]) // put it in our structure
 	}
 
@@ -251,7 +255,7 @@ func mem2DiskFileHeader() ([]byte, error) {
 }
 
 // Assemble disk structure for the Haystack trailer
-func mem2DiskFileTrailer(last_dict_ofs uint32, time_first int64, time_last int64) ([]byte, error) {
+func (p *Haystack) mem2DiskFileTrailer(last_dict_ofs uint32, time_first int64, time_last int64) ([]byte, error) {
 	content := make([]byte, 0, min_filesize)
 	data := make([]byte, 0, min_filesize)
 
@@ -270,7 +274,7 @@ func mem2DiskFileTrailer(last_dict_ofs uint32, time_first int64, time_last int64
 	addMultibyteToData(&data, uint64(crc), 4) // append CRC
 
 	// Encryption
-	encrypted_content, err := mem2DiskAES256GCMblock(&content, data)
+	encrypted_content, err := mem2DiskAES256GCMblock(&content, data, p.aes_key_uuid)
 	if err != nil {
 		return nil, err
 	}
@@ -280,33 +284,35 @@ func mem2DiskFileTrailer(last_dict_ofs uint32, time_first int64, time_last int64
 	return data, nil
 }
 
-// Assemble disk structure for bzip2 -9 compression
+// Assemble disk structure for bzip2 compression
 // https://github.com/dsnet/compress
 // (Go's standard library implementation only does decompression)
 // Ref. https://github.com/dsnet/compress/blob/master/doc/bzip2-format.pdf
 func mem2DiskBzip2block(content []byte) ([]byte, error) {
-	//fmt.Fprintf(os.Stderr, "bzip2 -9\n")	// DEBUG
+	//log.Printf("bzip2")	// DEBUG
 
 	var bzip2_config bzip2.WriterConfig
 	var buf bytes.Buffer
 
-	bzip2_config.Level = bzip2.BestCompression // Choose best compression (-9 equiv)
+	if config.compression_level > 0 { // 0 = no compression
+		bzip2_config.Level = int(config.compression_level) // Choose compression level
 
-	writer, err := bzip2.NewWriter(&buf, &bzip2_config)
-	if err != nil {
-		return nil, fmt.Errorf("error bzip2 compressing: %v", err)
-	}
+		writer, err := bzip2.NewWriter(&buf, &bzip2_config)
+		if err != nil {
+			return nil, fmt.Errorf("error bzip2 compressing: %v", err)
+		}
 
-	// Compress, bzip2 -9 style.
-	if _, err := writer.Write(content); err != nil {
-		return nil, fmt.Errorf("error bzip2 compressing: %v", err)
-	}
-	writer.Close()
+		// Compress, bzip2 style.
+		if _, err := writer.Write(content); err != nil {
+			return nil, fmt.Errorf("error bzip2 compressing: %v", err)
+		}
+		writer.Close()
 
-	// Check if our output is indeed shorter (it will almost always be)
-	if writer.OutputOffset > 0 && writer.OutputOffset < writer.InputOffset {
-		compressed_data := buf.Bytes()
-		return compressed_data, nil
+		// Check if our output is indeed shorter (it will almost always be)
+		if writer.OutputOffset > 0 && writer.OutputOffset < writer.InputOffset {
+			compressed_data := buf.Bytes()
+			return compressed_data, nil
+		}
 	}
 
 	// return original data, since compressed wasn't any shorter
@@ -316,16 +322,14 @@ func mem2DiskBzip2block(content []byte) ([]byte, error) {
 // Assemble disk structure for an AES encrypted block
 // We use 256 bit AES block cipher in GCM mode, with AEAD
 // Ref. https://csrc.nist.gov/pubs/sp/800/38/d/final
-func mem2DiskAES256GCMblock(plaintext *[]byte, extra []byte) (*[]byte, error) {
-	fmt.Fprintf(os.Stderr, "Process AES256+GCM (extra=%v)\n", extra) // DEBUG
+func mem2DiskAES256GCMblock(plaintext *[]byte, extra []byte, aes_key_uuid string) (*[]byte, error) {
+	//log.Printf("Process AES256+GCM (extra=%v)", extra) // DEBUG
 
-	// Convert printable AES key string back to binary sequence we can use
-	key, err := base64.StdEncoding.DecodeString(aes_test_key)
-	if err != nil {
-		return nil, fmt.Errorf("error decoding base64 encoded AES key: %s", err)
-	}
+	// Grab the raw key belonging with the current uuid. Always exists = Ok.
+	key := config.aes_keystore_array[aes_key_uuid]
+	//log.Printf("AES key = %v", key) // DEBUG
 
-	// Create a new AES cipher block using the raw key
+	// Create a new AES cipher block using the current raw key
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return nil, fmt.Errorf("error initialising AES cipher: %s", err)
@@ -365,7 +369,7 @@ func (p *Dictionary) Mem2Disk(prev_ofs uint32) ([]byte, error) {
 
 	addMultibyteToData(&content, uint64(prev_ofs), 4)    // File pointer to previous Dictionary&Haybale
 	addMultibyteToData(&content, uint64(p.num_dkeys), 4) // Number of (new) dkeys, max. 16M
-	// fmt.Fprintf(os.Stderr, "Dict: prev_ofs=%d, num_dkeys=%d\n", prev_ofs, p.num_dkeys) // DEBUG
+	// log.Printf("Dict: prev_ofs=%d, num_dkeys=%d", prev_ofs, p.num_dkeys) // DEBUG
 
 	for i := uint32(0); i < hashtable_size; i++ {
 		if p.dkey[i] == nil {
@@ -396,7 +400,7 @@ func (p *Dictionary) Mem2Disk(prev_ofs uint32) ([]byte, error) {
 	}
 	com_len := len(content)
 
-	//fmt.Fprintf(os.Stderr, "Dict mem2disk() unc_len=%d, com_len=%d\n", unc_len, com_len) // DEBUG
+	//log.Printf("Dict mem2disk() unc_len=%d, com_len=%d", unc_len, com_len) // DEBUG
 
 	addMultibyteToData(&data, uint64(unc_len), 4) // add uncompressed len into the section start
 	addMultibyteToData(&data, uint64(com_len), 4) // add compressed len into the section start
@@ -404,7 +408,7 @@ func (p *Dictionary) Mem2Disk(prev_ofs uint32) ([]byte, error) {
 	addMultibyteToData(&data, uint64(crc), 4) // append CRC
 
 	// Encryption
-	encrypted_content, err := mem2DiskAES256GCMblock(&content, data)
+	encrypted_content, err := mem2DiskAES256GCMblock(&content, data, p.HaystackPtr.aes_key_uuid)
 	if err != nil {
 		return nil, err
 	}
@@ -477,7 +481,7 @@ func (p *Haybale) Mem2Disk(d *Dictionary) ([]byte, error) {
 	addMultibyteToData(&data, uint64(crc), 4) // append CRC
 
 	// Encryption
-	encrypted_content, err := mem2DiskAES256GCMblock(&content, data)
+	encrypted_content, err := mem2DiskAES256GCMblock(&content, data, p.HaystackPtr.aes_key_uuid)
 	if err != nil {
 		return nil, err
 	}
