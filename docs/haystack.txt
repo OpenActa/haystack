@@ -27,12 +27,12 @@ confuse the system with other (different) database environments.
 
 Characteristics
     - Time-based Key-value store (non-unique)
-    - Linked haystack stalks (tuples) make up bales (records)
+    - Linked haystack stalks (tuples) make up bunches (records)
     - WORM (write-once, read-many) - no updates/deletes possible
     - Keys referenced via hash based Dictionary for efficiency
     - Sorted array of entries in Haybale (enabling binary search)
     - All entries are in the same index, ergo all entries are indexed
-    - Individual files kept within approx 128-512MB size (definitely <1G)
+    - Individual files kept within approx 128-512MB size (definitely <= 1G)
     - Fully handled in memory (no random access on disk)
     - Multi-byte values stored in LittleEndian order
     - Max 16 million distinct key names (24 bit)
@@ -42,7 +42,7 @@ Characteristics
     - Adjacent string values are de-duplicated both in memory and on disk
       (approx 10% space benefit)
 	- Per Haystack file on-disk compression, encryption and signature:
-      -> compression: bzip2 -9 compatible (3:1 or better ratio)
+      -> compression: bzip2 compatible (3:1 or better ratio)
 	  -> encryption: AES256-GCM with AEAD
 	  -> separate SHA-512 cryptographic signature
 
@@ -68,6 +68,10 @@ encryption are also performed per section.
 (Note: the viability of using Protocol Buffers (ProtoBuf) or FlatBuffers for the
 storage structure was evaluated, but dismissed, as it made some things awkward.)
 
+Haystacks are stored in time_first-time_last.hs named files, where time_first
+and time_last are int64 nanosecond UTC epoch time. The corresponding SHA512 file
+catalogue file is named time_first-time_last.hsc
+
 
 	Haystack structure diagram
 
@@ -78,6 +82,14 @@ storage structure was evaluated, but dismissed, as it made some things awkward.)
 		         +---------------------------------+
 		         |                  \_Haystalk ... |
 		         +---------------------------------+
+
+
+	Catalogue structure diagram
+
+		+--------+----------------------------------+
+		| Header | SHA-512 cryptographic hash block |
+		+--------+-------------+--------------------+
+
 
 The key Dictionary is implemented using a 24-bit hash table.
 
@@ -102,7 +114,7 @@ such a field if one does not already exist. _timestamp is always in UTC.
 		  \______________/
 
 In the reference implementation, Key-Value (KV) entries are added sequentially
-and not immediately searchable. First a sort operation on the Haybale is
+and not immediately searchable: first a sort operation on the Haybale is
 required, which flags it as sorted & immutable. At this stage, neighbouring
 string values are de-duplicated (this de-duplication also applies to the
 on-disk format).
@@ -199,6 +211,7 @@ ID 2: Disk Haybale Header (DiskHaybaleHeader) structure diagram
 		+-----+-----+-----+-----+-----+-----+-----+-----------------+--- ... ---+
 
     A Haybale must always be preceded by a Dictionary (can be 0 new entries)
+	time_first and time_last are int64 (nanoseconds Unix epoch)
 
 
     Disk Haystalk (DiskHaystalk) structure diagram (type = int64 or IEEEfloat64)
@@ -214,13 +227,13 @@ ID 2: Disk Haybale Header (DiskHaybaleHeader) structure diagram
 
 	Disk Haystalk (DiskHaystalk) structure diagram (type = string, non-dedupped)
 
-		+--------------+------+--------------------+-------------------+-------------------+---...--+
-		| dkey (#)     | type | first              | next              | len               | string |
-		+----+----+----+------+----+----+----+-----+----+----+----+----+----+----+----+----+---...--+
-	ofs |  0 |  1 |  2 |   3  |  4 |  5 |  6 |  7  |  8 |  9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 ... |
-		+----+----+----+------+----+----+----+-----+----+----+----+----+----+----+----+----+---...--+
-		| LSB  ... MSB |   n  | LSB    ...     MSB | LSB    ...    MSB | LSB    ...    MSB | xxx    |
-		+----+----+----+------+----+----+----+-----+----+----+----+----+----+----+----+----+---...--+
+		+--------------+------+--------------------+-------------------+-------------------+--- ... --+
+		| dkey (#)     | type | first              | next              | len               | string   |
+		+----+----+----+------+----+----+----+-----+----+----+----+----+----+----+----+----+--- ... --+
+	ofs |  0 |  1 |  2 |   3  |  4 |  5 |  6 |  7  |  8 |  9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 ...   |
+		+----+----+----+------+----+----+----+-----+----+----+----+----+----+----+----+----+--- ... --+
+		| LSB  ... MSB |   n  | LSB    ...     MSB | LSB    ...    MSB | LSB    ...    MSB | xxx      |
+		+----+----+----+------+----+----+----+-----+----+----+----+----+----+----+----+----+--- ... --+
 
 
 	Disk Haystalk (DiskHaystalk) structure diagram (type = string, dedupped)
@@ -248,6 +261,7 @@ ID = 254: Disk SHA-512 Cryptographic Hash Block Header structure diagram
 	Haystack dataset. SHA-512 is calculated over the entire compressed+encrypted
 	dataset, from header to trailer (e.g. the entire Haystack file).
 	A SHA-512 block is itself also AES encrypted.
+	time_first and time_last are int64 (nanoseconds Unix epoch)
 
 
 ID 255: Disk Haystack Trailer structure diagram
@@ -258,6 +272,8 @@ ID 255: Disk Haystack Trailer structure diagram
 		+-----+-----+-----+-----+-----+-----+-----+-----------------+
 		| LSB      ...      MSB | LSB   ...   MSB | LSB   ...   MSB |
 		+-----+-----+-----+-----+-----+-----+-----+-----------------+
+
+	time_first and time_last are int64 (nanoseconds Unix epoch)
 
 
 

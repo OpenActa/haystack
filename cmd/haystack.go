@@ -34,6 +34,7 @@ func main() {
 	log.Println("Haystack - Haystack log management system test & benchmark tool")
 	log.Println("Copyright (C) 2023 Arjen Lentz & Lentz Pty Ltd; All Rights Reserved")
 	log.Println("Licenced under the Affero General Public Licence (AGPL) v3(+)")
+	fmt.Println()
 
 	hs.Haybale = make([]*haystack.Haybale, 0)
 
@@ -110,7 +111,7 @@ func main() {
 
 					cur_hb.InsertBunch(&hs.Dict, flat)
 					if (i % 1000) == 0 {
-						log.Printf("%d000 lines\r", i/1000)
+						fmt.Fprintf(os.Stderr, "%d000 lines\r", i/1000)
 					}
 				}
 
@@ -167,12 +168,12 @@ func main() {
 
 				// Start the clock
 				start := time.Now()
-				data, sha512block, _ := hs.Mem2Disk() // also returns error
+				data, _ := hs.Mem2Disk() // also returns error
 				duration := time.Since(start)
 				log.Printf("Mem2Disk() duration: %v", duration)
 				os.WriteFile(fname, data, haystack.NewFilePermissions)
-				sha512hs_fname := fname + ".sha512hs"
-				os.WriteFile(sha512hs_fname, sha512block, haystack.NewFilePermissions)
+
+				haystack.CreateCatelogueFile(fname)
 
 				action = true
 			} else {
@@ -195,6 +196,7 @@ func main() {
 					if err := hs.Disk2Mem(data); err != nil {
 						log.Printf("Reading Haystack file %s: %v", fname, err)
 					}
+					data = nil // de-reference as we don't need it anymore
 					duration := time.Since(start)
 					log.Printf("Disk2Mem() duration: %v", duration)
 				}

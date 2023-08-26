@@ -30,7 +30,6 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
-	"crypto/sha512"
 	"fmt"
 	"hash/crc32"
 	"io"
@@ -117,7 +116,7 @@ func addKeyToData(buf *[]byte, dkey uint32, key *string) error {
 
 // Assemble the disk structure for an entire Haystack
 // Return compressed/encrypted dataset, sha512 block, error
-func (p *Haystack) Mem2Disk() ([]byte, []byte, error) {
+func (p *Haystack) Mem2Disk() ([]byte, error) {
 	data := make([]byte, 0, 16384) // Set up our byte array, with some initial room to spare
 
 	// Set this Haystack's AES uuid to current configured one.
@@ -125,7 +124,7 @@ func (p *Haystack) Mem2Disk() ([]byte, []byte, error) {
 
 	header, err := mem2DiskFileHeader()
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	} else {
 		data = append(data, header...)
 	}
@@ -141,14 +140,14 @@ func (p *Haystack) Mem2Disk() ([]byte, []byte, error) {
 		// that will write out a full Dictionary and append it to our header.
 		p.Dict.HaystackPtr = p
 		if dc, err := p.Dict.Mem2Disk(prev_ofs); err != nil {
-			return nil, nil, err
+			return nil, err
 		} else {
 			data = append(data, dc...)
 		}
 
 		// After a Dictionary comes a Haybale structure
 		if hb, err := p.Haybale[i].Mem2Disk(&p.Dict); err != nil {
-			return nil, nil, err
+			return nil, err
 		} else {
 			data = append(data, hb...)
 		}
@@ -165,65 +164,15 @@ func (p *Haystack) Mem2Disk() ([]byte, []byte, error) {
 	}
 
 	if trailer, err := p.mem2DiskFileTrailer(prev_ofs, time_first, time_last); err != nil {
-		return nil, nil, err
+		return nil, err
 	} else {
 		data = append(data, trailer...)
 	}
 
-	// Generate SHA512 for cryptographic signature, over the entire
-	// compressed+encrypted dataset
-	sha512section, err := p.mem2DiskSHA512block(data, time_first, time_last)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	return data, sha512section, nil
+	return data, nil
 }
 
-func (p *Haystack) mem2DiskSHA512block(dataset []byte, time_first int64, time_last int64) ([]byte, error) {
-	var data = make([]byte, 0, 16384)
-	var content = make([]byte, 0, 16384)
-
-	// Give SHA512 file has a proper header so we have major/minor versioning
-	hdr, err := mem2DiskFileHeader()
-	if err != nil {
-		return nil, err
-	}
-
-	// Now for the SHA512 itself
-	sha512 := sha512.Sum512(dataset)
-
-	// section header
-	addMultibyteToData(&data, uint64(signature), 3)
-	addByteToData(&data, section_sha512)
-
-	// section content
-	addMultibyteToData(&content, uint64(time_first), 8)
-	addMultibyteToData(&content, uint64(time_last), 8)
-
-	for i := 0; i < sha512_byte_len; i++ {
-		addByteToData(&content, sha512[i]) // 32 bytes (512 bits) SHA512
-	}
-
-	// now we know the content length. Don't bother with compression.
-	addMultibyteToData(&data, uint64(len(content)), 4)
-	addMultibyteToData(&data, uint64(len(content)), 4)
-
-	crc := crc32.ChecksumIEEE(content)        // CRC over the content
-	addMultibyteToData(&data, uint64(crc), 4) // append CRC
-
-	// Encryption
-	encrypted_content, err := mem2DiskAES256GCMblock(&content, data, p.aes_key_uuid)
-	if err != nil {
-		return nil, err
-	}
-
-	data = append(data, *encrypted_content...) // we can glue it all together
-
-	return append(hdr, data...), nil
-}
-
-// Assemble disk structure for the Haystack header
+// Assemble disk structure for the Haystack or SHA-512 header
 func mem2DiskFileHeader() ([]byte, error) {
 	content := make([]byte, 0, min_filesize)
 	data := make([]byte, 0, min_filesize)
@@ -279,7 +228,7 @@ func (p *Haystack) mem2DiskFileTrailer(last_dict_ofs uint32, time_first int64, t
 		return nil, err
 	}
 
-  data = append(data, *encrypted_content...) // we can glue it all together
+	data = append(data, *encrypted_content...) // we can glue it all together
 
 	return data, nil
 }
