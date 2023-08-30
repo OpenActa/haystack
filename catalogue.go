@@ -58,15 +58,29 @@ func CreateCatelogueFile(haystack_fname string) error {
 		return err
 	}
 
+	sha512hs_fname := fmt.Sprintf("%s/%v-%v.hsc", config.catalogue_dir, time_first, time_last)
+	fp, err := os.OpenFile(sha512hs_fname, os.O_WRONLY|os.O_CREATE, NewFilePermissions)
+	if err != nil {
+		log.Printf("Error creating file '%s' for write: %v", HaystackRoutines.diskwriter_iname, err)
+		return err
+	}
+	defer fp.Close() // Close this file when this function returns
+
+	// Give SHA512 file a proper file header so we have major/minor versioning
+	err = mem2DiskFileHeader(fp)
+	if err != nil {
+		return err
+	}
+
 	sha512data, err := mem2DiskSHA512block(data, time_first, time_last)
 	if err != nil {
 		log.Printf("Error calculating SHA-512 catalogue entry for Haystack '%s': %v", haystack_fname, err)
 		return err
 	}
 
-	sha512hs_fname := fmt.Sprintf("%s/%v-%v.hsc", config.catalogue_dir, time_first, time_last)
-	if err = os.WriteFile(sha512hs_fname, sha512data, NewFilePermissions); err != nil {
-		log.Printf("Error writing Haystack file '%s': %v", sha512hs_fname, err)
+	_, err = fp.Write(sha512data)
+	if err != nil {
+		log.Printf("Error writing %d bytes to Haystack Catalogue file '%s': %v", len(sha512data), sha512hs_fname, err)
 		return err
 	}
 
@@ -77,12 +91,6 @@ func CreateCatelogueFile(haystack_fname string) error {
 func mem2DiskSHA512block(dataset []byte, time_first int64, time_last int64) ([]byte, error) {
 	var data = make([]byte, 0, 16384)
 	var content = make([]byte, 0, 16384)
-
-	// Give SHA512 file a proper file header so we have major/minor versioning
-	hdr, err := mem2DiskFileHeader()
-	if err != nil {
-		return nil, err
-	}
 
 	// Now for the SHA512 itself
 	sha512 := sha512.Sum512(dataset)
@@ -114,7 +122,7 @@ func mem2DiskSHA512block(dataset []byte, time_first int64, time_last int64) ([]b
 
 	data = append(data, *encrypted_content...) // we can glue it all together
 
-	return append(hdr, data...), nil
+	return data, nil
 }
 
 // EOF

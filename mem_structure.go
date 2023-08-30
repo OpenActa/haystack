@@ -24,7 +24,7 @@ const (
 	Max_memsize      = 512 * 1024 * 1024 // 512MB (half a gig) in RAM
 	hashtable_size   = 16 * 1024 * 1024  // Exact size of key hashtable (16M)
 	Timestamp_key    = "_timestamp"      // Timestamp key string
-	haystalk_ofs_nil = 0xffffffff        // used for nil, last
+	haystalk_ofs_nil = 0xffffffff        // used for nil, last, err
 	cap_initial      = 100000            // Size of initial haystalk slice allocation
 
 	// outer bounds of config variables
@@ -46,6 +46,8 @@ type Haystack struct {
 	Haybale []*Haybale // Array of pointers to Haybale record (time slices)
 
 	aes_key_uuid string // UUID of AES key used to encrypt this Haystack on disk
+
+	last_dict_ofs uint32
 
 	// needed to keep track of our in-mem and on-disk size
 	memsize uint32

@@ -33,7 +33,7 @@ import (
 )
 
 // Helper function for InsertBunch() below
-// Inserts a new stalk and returns its own offset (0 for error -> ignore)
+// Inserts a new stalk and returns its own offset (haystalk_ofs_nil for error -> ignore)
 func (p *Haybale) insertStalk(d *Dictionary, k string, v string) uint32 {
 	var newstalk Haystalk
 
@@ -91,10 +91,10 @@ func (p *Haybale) insertStalk(d *Dictionary, k string, v string) uint32 {
 }
 
 // Insert a bunch (aka a "record") of KV entries
-func (p *Haybale) InsertBunch(d *Dictionary, flatmap map[string]interface{}) {
+func (p *HaystackRoutinesType) InsertBunch(flatmap map[string]interface{}) {
 	var first, prev uint32
 
-	if p.is_sorted_immutable {
+	if p.writer_cur_haybale.is_sorted_immutable {
 		// We can't break this haybale from being immutable
 		log.Printf("Cannot insert to immutable Haybale")
 		// TODO: return some error condition
@@ -103,28 +103,38 @@ func (p *Haybale) InsertBunch(d *Dictionary, flatmap map[string]interface{}) {
 
 	if _, ok := flatmap[Timestamp_key]; !ok {
 		return // Just ignore this bunch if there's no _timestamp field
+		// TODO: generate a _timestamp and insert that way?
 	} else {
 		// add the first tuple (_timestamp)
 		vs := fmt.Sprintf("%v", flatmap[Timestamp_key]) // TODO improve this construct
-		first = p.insertStalk(d, Timestamp_key, vs)
+		first = p.writer_cur_haybale.insertStalk(&p.writer_cur_haystack.Dict, Timestamp_key, vs)
 		// We need to do this here as _timestamp is skipped in the loop below
-		p.haystalk[first].first_ofs = first // first field (_timestamp) points to self
+		p.writer_cur_haybale.haystalk[first].first_ofs = first // first field (_timestamp) points to self
 
 		/*
 			Update time_first and time_last (in nsecs) in our record.
 			This is somewhat tricky as we'll need to parse the time string.
-			What format will it have? We should support multiple formats.
+			What format will it have?
+			TODO: we should support multiple formats.
 		*/
-		if t, err := time.Parse(time.RFC3339Nano, vs); err == nil { // Try to parse
-			ts := t.UnixNano() // Convert to Unix nanosecond timestamp
-
-			if p.time_first == 0 || ts < p.time_first {
-				p.time_first = ts // Update lowest if lower
-			}
-			if ts > p.time_last {
-				p.time_last = ts // Update highest if higher
+		t, err := time.Parse(time.RFC3339Nano, vs)
+		if err != nil { // Try to parse
+			t, err = time.Parse("2006-01-02T15:04:05.999999999+0000", vs)
+			if err != nil {
+				log.Printf("Can't parse timestamp '%s': %v", vs, err)
+				panic("Aawrgh!")
 			}
 		}
+
+		ts := t.UnixNano() // Convert to Unix nanosecond timestamp
+
+		if p.writer_cur_haybale.time_first == 0 || ts < p.writer_cur_haybale.time_first {
+			p.writer_cur_haybale.time_first = ts // Update lowest if lower
+		}
+		if ts > p.writer_cur_haybale.time_last {
+			p.writer_cur_haybale.time_last = ts // Update highest if higher
+		}
+
 	}
 
 	// Now insert all the KV pairs as stalks
@@ -142,26 +152,26 @@ func (p *Haybale) InsertBunch(d *Dictionary, flatmap map[string]interface{}) {
 
 			// insert each tuple
 			vs := fmt.Sprintf("%v", v) // TODO improve this construct
-			pos := p.insertStalk(d, k, vs)
+			pos := p.writer_cur_haybale.insertStalk(&p.writer_cur_haystack.Dict, k, vs)
 			if pos != haystalk_ofs_nil {
-				p.haystalk[pos].first_ofs = first // Point to first (_timestamp) field
-				p.haystalk[pos].next_ofs = prev   // Make a backwards chain of fields
-				prev = pos                        // On to next
+				p.writer_cur_haybale.haystalk[pos].first_ofs = first // Point to first (_timestamp) field
+				p.writer_cur_haybale.haystalk[pos].next_ofs = prev   // Make a backwards chain of fields
+				prev = pos                                           // On to next
 			}
 		}
 	}
 
-	p.haystalk[first].next_ofs = prev // Put _timestamp field in front of the rest
+	p.writer_cur_haybale.haystalk[first].next_ofs = prev // Put _timestamp field in front of the rest
 }
 
 // Sort all haybales
-func (p *Haystack) SortAllBales() {
-	//log.Printf("Sorting all (%d) haybale(s)...", len(p.Haybale)) // DEBUG
+func (p *HaystackRoutinesType) SortAllBales() {
+	//log.Printf("Sorting all (%d) haybale(s)...", len(p.writer_cur_haystack.Haybale)) // DEBUG
 	// Start the clock
 	//start := time.Now() // DEBUG
 
-	for i := range p.Haybale {
-		p.Haybale[i].SortBale()
+	for i := range p.writer_cur_haystack.Haybale {
+		p.writer_cur_haystack.Haybale[i].SortBale()
 	}
 
 	//duration := time.Since(start)	// DEBUG

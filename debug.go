@@ -22,6 +22,20 @@ import (
 	"log"
 )
 
+// Print all Haybales (TEST/DEBUG purposes)
+func (p *HaystackRoutinesType) PrintAllBales() {
+	//log.Printf("Printing all (%d) haybale(s)...", len(p.writer_cur_haybale)) // DEBUG
+	// Start the clock
+	//start := time.Now() // DEBUG
+
+	for i := range p.writer_cur_haystack.Haybale {
+		p.writer_cur_haystack.Haybale[i].PrintBale(&p.writer_cur_haystack.Dict)
+	}
+
+	//duration := time.Since(start)	// DEBUG
+	//log.Printf("Haybale sort duration: %v", duration)	// DEBUG
+}
+
 // Print Haybale (TEST/DEBUG purposes)
 func (p *Haybale) PrintBale(d *Dictionary) {
 	p.SortBale()

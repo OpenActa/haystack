@@ -17,4 +17,9 @@ See docs/ for architectural detail and background.
 It is still early days. As OpenActa is getting developed, some changes in the
 externally accessible functions is expected.
 
+The code contains some *nix specifics such as / filepaths and syslog support,
+so won't run under Windows.
+Various evolved parts (mem2disk.go comes to mind) require refactoring by now,
+particularly since the introduction of Go routines (a diskwriter thread).
+
     -- Arjen, June 2023

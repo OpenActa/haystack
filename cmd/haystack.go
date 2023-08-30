@@ -28,15 +28,11 @@ import (
 	"openacta.dev/haystack"
 )
 
-var hs haystack.Haystack // New Haystack
-
 func main() {
 	log.Println("Haystack - Haystack log management system test & benchmark tool")
 	log.Println("Copyright (C) 2023 Arjen Lentz & Lentz Pty Ltd; All Rights Reserved")
 	log.Println("Licenced under the Affero General Public Licence (AGPL) v3(+)")
 	fmt.Println()
-
-	hs.Haybale = make([]*haystack.Haybale, 0)
 
 	var action bool
 	var curarg int
@@ -60,11 +56,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	errors = haystack.ConfigureAESKeyStore()
-	if errors > 0 {
-		log.Printf("%d errors initialising Haystack subsystem", errors)
-		os.Exit(1)
-	}
+	haystack.StartUp()
 
 	for curarg = 1; curarg < len(os.Args); curarg++ {
 		switch os.Args[curarg] {
@@ -89,27 +81,25 @@ func main() {
 				// Start the clock
 				start := time.Now()
 
-				cur_hb := new(haystack.Haybale)
-				cur_hb.HaystackPtr = &hs
-				hs.Haybale = append(hs.Haybale, cur_hb)
-
 				// Iterate over each line in the file
 				var i int
 				for scanner.Scan() {
 					line := scanner.Text()
 					i++
 
-					if cur_hb.Memsize > haystack.Max_memsize {
-						new_hb := new(haystack.Haybale)
+					/*
+						if cur_hb.Memsize > haystack.Max_memsize {
+							new_hb := new(haystack.Haybale)
 
-						hs.Haybale = append(hs.Haybale, new_hb)
-						cur_hb = new_hb
-						cur_hb.HaystackPtr = &hs
-					}
+							hs.Haybale = append(hs.Haybale, new_hb)
+							cur_hb = new_hb
+							cur_hb.HaystackPtr = &hs
+						}
+					*/
 					flat, res := haystack.JSONToKVmap([]byte(line))
 					_ = res
 
-					cur_hb.InsertBunch(&hs.Dict, flat)
+					haystack.HaystackRoutines.InsertBunch(flat)
 					if (i % 1000) == 0 {
 						fmt.Fprintf(os.Stderr, "%d000 lines\r", i/1000)
 					}
@@ -130,14 +120,12 @@ func main() {
 			}
 
 		case "-p":
-			for i := range hs.Haybale {
-				(*hs.Haybale[i]).PrintBale(&hs.Dict)
-			}
+			haystack.HaystackRoutines.PrintAllBales()
 
 			action = true
 
 		case "-kv":
-			hs.SortAllBales()
+			haystack.HaystackRoutines.SortAllBales()
 
 			kv_array := make(map[string]string)
 			if curarg+2 < len(os.Args) {
@@ -155,55 +143,40 @@ func main() {
 					hs.SearchKeyVal(k, v)
 				}
 			*/
-			hs.SearchKeyValArray(kv_array)
+			haystack.HaystackRoutines.SearchKeyValArray(kv_array)
 
 			action = true
 			curarg = len(os.Args) // Hack so we're always the last param(s)
 
 		case "-w":
-			if curarg+1 < len(os.Args) {
-				curarg++
-				fname := os.Args[curarg]
-				log.Printf("Writing Haystack file '%s'", fname)
-
-				// Start the clock
-				start := time.Now()
-				data, _ := hs.Mem2Disk() // also returns error
-				duration := time.Since(start)
-				log.Printf("Mem2Disk() duration: %v", duration)
-				os.WriteFile(fname, data, haystack.NewFilePermissions)
-
-				haystack.CreateCatelogueFile(fname)
-
-				action = true
-			} else {
-				log.Printf("Missing option for -w (requires a filename)")
-			}
+			haystack.HaystackRoutines.FlushHaystack()
 
 			action = true
 
 		case "-r":
-			if curarg+1 < len(os.Args) {
-				curarg++
-				fname := os.Args[curarg]
-				log.Printf("Reading Haystack file '%s'", fname)
+			/*
+				if curarg+1 < len(os.Args) {
+					curarg++
+					fname := os.Args[curarg]
+					log.Printf("Reading Haystack file '%s'", fname)
 
-				if data, err := os.ReadFile(fname); err != nil {
-					log.Printf("Error reading Haystack file %s: %v", fname, err)
-				} else {
-					// Start the clock
-					start := time.Now()
-					if err := hs.Disk2Mem(data); err != nil {
-						log.Printf("Reading Haystack file %s: %v", fname, err)
+					if data, err := os.ReadFile(fname); err != nil {
+						log.Printf("Error reading Haystack file %s: %v", fname, err)
+					} else {
+						// Start the clock
+						start := time.Now()
+						if err := haystack.writer_cur_haystack.Disk2Mem(data); err != nil {
+							log.Printf("Reading Haystack file %s: %v", fname, err)
+						}
+						data = nil // de-reference as we don't need it anymore
+						duration := time.Since(start)
+						log.Printf("Disk2Mem() duration: %v", duration)
 					}
-					data = nil // de-reference as we don't need it anymore
-					duration := time.Since(start)
-					log.Printf("Disk2Mem() duration: %v", duration)
+					action = true
+				} else {
+					log.Printf("Missing option for -r (requires a filename)")
 				}
-				action = true
-			} else {
-				log.Printf("Missing option for -r (requires a filename)")
-			}
+			*/
 		}
 	}
 
@@ -215,6 +188,8 @@ func main() {
 		log.Printf(" -p                   Print mem to stdout")
 		log.Printf(" -kv <key> <val> ...  Search for <key> <value> pair(s) in mem")
 	}
+
+	haystack.ShutDown()
 }
 
 // EOF

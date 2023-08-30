@@ -26,7 +26,7 @@ import (
 	"time"
 )
 
-func (p *Haystack) SearchKeyValArray(kv_array map[string]string) {
+func (p *HaystackRoutinesType) SearchKeyValArray(kv_array map[string]string) {
 	var matches uint
 
 	// Start the clock
@@ -37,7 +37,7 @@ func (p *Haystack) SearchKeyValArray(kv_array map[string]string) {
 		var new_hv Haystalk
 		var found bool
 
-		new_hv.dkey, found = p.Dict.KeyExists(ks)
+		new_hv.dkey, found = p.writer_cur_haystack.Dict.KeyExists(ks)
 
 		// doesn't exist, and it's an AND construct so we can just bail out
 		if !found {
@@ -68,8 +68,8 @@ func (p *Haystack) SearchKeyValArray(kv_array map[string]string) {
 	*/
 
 	// Run through all Haybales
-	for i := range p.Haybale {
-		cur_hb := p.Haybale[i]
+	for i := range p.writer_cur_haystack.Haybale {
+		cur_hb := p.writer_cur_haystack.Haybale[i]
 
 		// Make sure the bale is sorted
 		//cur_hb.SortBale()					// DEBUG - not any more for normal ops
@@ -143,7 +143,7 @@ func (p *Haystack) SearchKeyValArray(kv_array map[string]string) {
 					vs = *cur_hb.haystalk[k].val.GetString()
 				}
 
-				bunch[*p.Dict.dkey[cur_hb.haystalk[k].dkey]] = vs
+				bunch[*p.writer_cur_haystack.Dict.dkey[cur_hb.haystalk[k].dkey]] = vs
 			}
 
 			bunch_json, _ := json.Marshal(bunch)

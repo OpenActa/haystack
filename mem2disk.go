@@ -33,7 +33,9 @@ import (
 	"fmt"
 	"hash/crc32"
 	"io"
+	"log"
 	"math"
+	"os"
 	"strings"
 
 	"github.com/dsnet/compress/bzip2"
@@ -116,64 +118,38 @@ func addKeyToData(buf *[]byte, dkey uint32, key *string) error {
 
 // Assemble the disk structure for an entire Haystack
 // Return compressed/encrypted dataset, sha512 block, error
-func (p *Haystack) Mem2Disk() ([]byte, error) {
-	data := make([]byte, 0, 16384) // Set up our byte array, with some initial room to spare
-
+func (p *Haystack) Mem2Disk() error {
 	// Set this Haystack's AES uuid to current configured one.
 	p.aes_key_uuid = config.aes_keystore_current_uuid
 
-	header, err := mem2DiskFileHeader()
+	err := mem2DiskFileHeader(HaystackRoutines.writer_cur_fp)
 	if err != nil {
-		return nil, err
-	} else {
-		data = append(data, header...)
+		return err
 	}
 
 	// Now go through all the haybales
 	var time_first, time_last int64
-	var prev_ofs, cur_ofs uint32
 	for i := range p.Haybale {
-		cur_ofs = uint32(len(data)) // note current offset in our buffer
-
-		// First we write out a Dictionary.
-		// For the first Haybale, prev_ofs will be 0:
-		// that will write out a full Dictionary and append it to our header.
-		p.Dict.HaystackPtr = p
-		if dc, err := p.Dict.Mem2Disk(prev_ofs); err != nil {
-			return nil, err
-		} else {
-			data = append(data, dc...)
-		}
-
-		// After a Dictionary comes a Haybale structure
-		if hb, err := p.Haybale[i].Mem2Disk(&p.Dict); err != nil {
-			return nil, err
-		} else {
-			data = append(data, hb...)
-		}
-
-		prev_ofs = cur_ofs
+		mem2DiskDictionaryAndHaybale(p, i)
 
 		// Update our bounding timestamps as well (for the trailer)
 		if time_first == 0 || p.Haybale[i].time_first < time_first {
 			time_first = p.Haybale[i].time_first
 		}
 		if p.Haybale[i].time_last > time_last {
-			time_first = p.Haybale[i].time_last
+			time_last = p.Haybale[i].time_last
 		}
 	}
 
-	if trailer, err := p.mem2DiskFileTrailer(prev_ofs, time_first, time_last); err != nil {
-		return nil, err
-	} else {
-		data = append(data, trailer...)
+	if err := p.mem2DiskFileTrailer(HaystackRoutines.writer_prev_ofs, time_first, time_last); err != nil {
+		return err
 	}
 
-	return data, nil
+	return nil
 }
 
 // Assemble disk structure for the Haystack or SHA-512 header
-func mem2DiskFileHeader() ([]byte, error) {
+func mem2DiskFileHeader(fp *os.File) error {
 	content := make([]byte, 0, min_filesize)
 	data := make([]byte, 0, min_filesize)
 
@@ -200,11 +176,56 @@ func mem2DiskFileHeader() ([]byte, error) {
 
 	data = append(data, content...) // we can glue it all together
 
-	return data, nil
+	_, err := fp.Write(data)
+	if err != nil {
+		log.Printf("Error writing header (%d bytes) to Haystack file '%s': %v", len(data), HaystackRoutines.diskwriter_iname, err)
+		return err
+	}
+
+	return nil
+}
+
+// Write Haybale i of specified Haystack to disk
+func mem2DiskDictionaryAndHaybale(p *Haystack, i int) error {
+	data := make([]byte, 0, min_filesize)
+
+	// Find out current file length, so we can use it for our prev_ofs pointer
+	ofs, err := HaystackRoutines.writer_cur_fp.Seek(0, io.SeekEnd)
+	if err != nil {
+		return err
+	}
+
+	// First we write out a Dictionary.
+	// For the first Haybale, prev_ofs will be 0:
+	// that will write out a full Dictionary and append it to our header.
+	p.Dict.HaystackPtr = p
+	if dc, err := p.Dict.Mem2Disk(HaystackRoutines.writer_prev_ofs); err != nil {
+		return err
+	} else {
+		data = append(data, dc...)
+	}
+
+	// After a Dictionary comes a Haybale structure
+	if hb, err := p.Haybale[i].Mem2Disk(&p.Dict); err != nil {
+		return err
+	} else {
+		data = append(data, hb...)
+	}
+
+	_, err = HaystackRoutines.writer_cur_fp.Write(data)
+	if err != nil {
+		log.Printf("Error writing Haybale (%d bytes) to Haystack file '%s': %v", len(data), HaystackRoutines.diskwriter_iname, err)
+		return err
+	}
+
+	// Update prev_ofs
+	HaystackRoutines.writer_prev_ofs = uint32(ofs)
+
+	return nil
 }
 
 // Assemble disk structure for the Haystack trailer
-func (p *Haystack) mem2DiskFileTrailer(last_dict_ofs uint32, time_first int64, time_last int64) ([]byte, error) {
+func (p *Haystack) mem2DiskFileTrailer(last_dict_ofs uint32, time_first int64, time_last int64) error {
 	content := make([]byte, 0, min_filesize)
 	data := make([]byte, 0, min_filesize)
 
@@ -225,12 +246,18 @@ func (p *Haystack) mem2DiskFileTrailer(last_dict_ofs uint32, time_first int64, t
 	// Encryption
 	encrypted_content, err := mem2DiskAES256GCMblock(&content, data, p.aes_key_uuid)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	data = append(data, *encrypted_content...) // we can glue it all together
 
-	return data, nil
+	_, err = HaystackRoutines.writer_cur_fp.Write(data)
+	if err != nil {
+		log.Printf("Error writing trailer (%d bytes) to Haystack file '%s': %v", len(data), HaystackRoutines.diskwriter_iname, err)
+		return err
+	}
+
+	return nil
 }
 
 // Assemble disk structure for bzip2 compression
