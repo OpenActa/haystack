@@ -73,8 +73,9 @@ func (p *HaystackRoutinesType) SearchKeyValArray(kv_array map[string]string) {
 
 		// Make sure the bale is sorted
 		//cur_hb.SortBale()					// DEBUG - not any more for normal ops
-		if !cur_hb.is_sorted_immutable { // So obviously this should never happen.
-			log.Printf("Haybale %d is not sorted, we can't search that!", i) // DEBUG
+		if !cur_hb.is_sorted_immutable { // Still being written to, can't search
+			//log.Printf("Haybale %d is not sorted, we can't search that!", i) // DEBUG
+			continue
 		}
 
 		// Check in each Haybale
@@ -186,8 +187,9 @@ func (p *Haystack) SearchKeyVal(ks string, v string) {
 
 		// Make sure the bale is sorted
 		//cur_hb.SortBale()		// DEBUG - not any more for normal ops
-		if !cur_hb.is_sorted_immutable { // So obviously this should never happen.
-			panic("Haybale is not sorted, we can't search that!")
+		if !cur_hb.is_sorted_immutable { // Still being written to, can't search
+			//panic("Haybale is not sorted, we can't search that!")
+			continue
 		}
 
 		// Check in each Haybale

@@ -90,8 +90,8 @@ func ConfigureVariables() int {
 
 	errors += config_parse_size(&config.haystack_wait_maxsize, "haystack.haystack_wait_maxsize", haystack_wait_maxsize_lower, haystack_wait_maxsize_upper)
 	errors += config_parse_size(&config.haybale_wait_minsize, "haystack.haybale_wait_minsize", haybale_wait_minsize_lower, haybale_wait_minsize_upper)
-	errors += config_parse_int(&config.haybale_wait_mintime, "haystack.haybale_wait_mintime", haybale_wait_mintime_lower, haybale_wait_mintime_upper)
-	errors += config_parse_int(&config.haybale_wait_maxtime, "haystack.haybale_wait_maxtime", haybale_wait_maxtime_lower, haybale_wait_maxtime_upper)
+	errors += config_parse_time(&config.haybale_wait_mintime, "haystack.haybale_wait_mintime", haybale_wait_mintime_lower, haybale_wait_mintime_upper)
+	errors += config_parse_time(&config.haybale_wait_maxtime, "haystack.haybale_wait_maxtime", haybale_wait_maxtime_lower, haybale_wait_maxtime_upper)
 
 	errors += config_parse_int(&config.compression_level, "haystack.compression_level", compression_level_lower, compression_level_upper)
 
@@ -281,12 +281,47 @@ func config_parse_size(i *uint32, key string, lower uint32, upper uint32) int {
 	}
 	multiplier := 1
 
+	s = strings.ToUpper(s)
 	if strings.HasSuffix(s, "M") {
 		multiplier = 1024 * 1024
 		s = strings.TrimSuffix(s, "M")
 	} else if strings.HasSuffix(s, "G") {
 		multiplier = 1024 * 1024 * 1024
 		s = strings.TrimSuffix(s, "G")
+	}
+
+	size, err := strconv.Atoi(s)
+	if err != nil {
+		log.Printf("Cannot parse variable %s: '%s'", key, s)
+		return 1
+	}
+
+	*i = uint32(size) * uint32(multiplier)
+
+	if *i < lower || *i > upper {
+		log.Printf("Variable %s out of bounds (%d), must be between %d and %d",
+			key, *i, lower, upper)
+		return 1
+	}
+
+	return 0 // 0 = success
+}
+
+func config_parse_time(i *uint32, key string, lower uint32, upper uint32) int {
+	s := viper.GetString(key)
+	if s == "" {
+		log.Printf("Configuration entry for '%s' missing or empty", key)
+		return 1
+	}
+	multiplier := 1
+
+	s = strings.ToLower(s)
+	if strings.HasSuffix(s, "s") {
+		multiplier = 1
+		s = strings.TrimSuffix(s, "s")
+	} else if strings.HasSuffix(s, "m") {
+		multiplier = 60
+		s = strings.TrimSuffix(s, "m")
 	}
 
 	size, err := strconv.Atoi(s)

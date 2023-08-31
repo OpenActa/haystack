@@ -34,6 +34,8 @@ import (
 type HaystackRoutinesType struct {
 	diskreader_ch chan int
 
+	newhaybale_mutex sync.Mutex
+
 	diskwriter_ch chan int
 	diskwriter_wg sync.WaitGroup
 
@@ -56,7 +58,7 @@ const (
 
 // Call after getting config: ConfigureVariables() + ValidateConfiguration()
 func StartUp() error {
-	log.Printf("Haystack startup")
+	log.Printf("Haystack subsystem startup")
 
 	newHaystack()
 
@@ -70,8 +72,8 @@ func StartUp() error {
 	HaystackRoutines.diskwriter_iname = fmt.Sprintf("%s/%s.hs", config.datastore_dir, hostname)
 
 	// Create our inter-routine comms channels
-	HaystackRoutines.diskreader_ch = make(chan int)
-	HaystackRoutines.diskwriter_ch = make(chan int)
+	HaystackRoutines.diskreader_ch = make(chan int, 10)
+	HaystackRoutines.diskwriter_ch = make(chan int, 10)
 
 	// Start up our subsystem Go routines
 	go diskReader()
@@ -107,45 +109,73 @@ func diskReader() {
 // diskWriter go routine
 func diskWriter() {
 	for {
-		select {
-		// Check for commands from the diskwriter channel
-		case cmd := <-HaystackRoutines.diskwriter_ch:
-			switch cmd {
-			case diskwriter_flush_haybale: // Flush Haybale
-				// Do we actually have anything to flush?
-				if HaystackRoutines.writer_cur_haystack.Haybale[len(HaystackRoutines.writer_cur_haystack.Haybale)-1].Memsize == 0 {
-					break // Apparently not, so don't do anything here
+		cmd := <-HaystackRoutines.diskwriter_ch
+		switch cmd {
+		case diskwriter_flush_haybale: // Flush Haybale
+			// Do we actually have anything to flush?
+			if HaystackRoutines.writer_cur_haystack.Haybale[len(HaystackRoutines.writer_cur_haystack.Haybale)-1].Memsize == 0 {
+				break // Apparently not, so don't do anything here
+			}
+
+			log.Printf("Writing Haybale") // DEBUG
+
+			writeHaystackHeader() // only writes something if needed
+
+			for i := range HaystackRoutines.writer_cur_haystack.Haybale {
+				if HaystackRoutines.writer_cur_haystack.Haybale[i].Memsize > 0 && // Haybale has some content
+					!HaystackRoutines.writer_cur_haystack.Haybale[i].is_sorted_immutable { // Haybale is not yet immutable
+					if HaystackRoutines.writer_cur_haystack.Haybale[i] == HaystackRoutines.writer_cur_haybale {
+						newHaybale() // Create a new Haybale for the main thread to write to
+					}
+					HaystackRoutines.writer_cur_haystack.Haybale[i].SortBale() // Make it immutable, too
+
+					// Write out Dictionary+Haybale
+					mem2DiskDictionaryAndHaybale(HaystackRoutines.writer_cur_haystack, i)
+				}
+			}
+
+		case diskwriter_flush_haystack: // Flush Haystack
+			// Do we actually have anything to flush?
+			if HaystackRoutines.writer_cur_haystack.Haybale[len(HaystackRoutines.writer_cur_haystack.Haybale)-1].Memsize == 0 {
+				break // Apparently not, so don't do anything here
+			}
+
+			log.Printf("Writing Haystack file") // DEBUG
+
+			writeHaystackHeader() // only writes something if needed
+
+			var time_first, time_last int64
+			for i := range HaystackRoutines.writer_cur_haystack.Haybale {
+				if HaystackRoutines.writer_cur_haystack.Haybale[i].Memsize > 0 && // Haybale has some content
+					!HaystackRoutines.writer_cur_haystack.Haybale[i].is_sorted_immutable { // Haybale is not yet immutable
+					if HaystackRoutines.writer_cur_haystack.Haybale[i] == HaystackRoutines.writer_cur_haybale {
+						newHaybale() // Create a new Haybale for the main thread to write to
+					}
+					HaystackRoutines.writer_cur_haystack.Haybale[i].SortBale() // Make it immutable, too
+
+					// Write out Dictionary+Haybale
+					mem2DiskDictionaryAndHaybale(HaystackRoutines.writer_cur_haystack, i)
 				}
 
-				log.Printf("Writing Haybale")
-
-				writeHaystackHeader() // only writes something if needed
-
-			case diskwriter_flush_haystack: // Flush Haystack
-				//HaystackRoutines.FlushHaybale()
-
-				// Do we actually have anything to flush?
-				if HaystackRoutines.writer_cur_haystack.Haybale[len(HaystackRoutines.writer_cur_haystack.Haybale)-1].Memsize == 0 {
-					break // Apparently not, so don't do anything here
+				// Update our bounding timestamps as well (for the trailer, and SHA512 catalogue file)
+				if time_first == 0 || HaystackRoutines.writer_cur_haystack.Haybale[i].time_first < time_first {
+					time_first = HaystackRoutines.writer_cur_haystack.Haybale[i].time_first
 				}
+				if HaystackRoutines.writer_cur_haystack.Haybale[i].time_last > time_last {
+					time_last = HaystackRoutines.writer_cur_haystack.Haybale[i].time_last
+				}
+			}
 
-				log.Printf("Writing Haystack file")
+			writeHaystackTrailer(time_first, time_last)
 
-				writeHaystackHeader() // only writes something if needed
+		case diskwriter_close: // Close everything
+			// only requested by ShutDown(), uses a wait group
+			log.Printf("Haystack subsystem (diskwriter thread) shutdown")
 
+			// Finalise an open Haystack file, if there is one
+			if len(HaystackRoutines.writer_cur_haystack.Haybale) >= 1 {
 				var time_first, time_last int64
 				for i := range HaystackRoutines.writer_cur_haystack.Haybale {
-					if HaystackRoutines.writer_cur_haystack.Haybale[i].Memsize > 0 && // Haybale has some content
-						!HaystackRoutines.writer_cur_haystack.Haybale[i].is_sorted_immutable { // Haybale is not yet immutable
-						if HaystackRoutines.writer_cur_haystack.Haybale[i] == HaystackRoutines.writer_cur_haybale {
-							newHaybale() // Create a new Haybale for the main thread to write to
-						}
-						HaystackRoutines.writer_cur_haystack.Haybale[i].SortBale() // Make it immutable, too
-
-						// Write out Dictionary+Haybale
-						mem2DiskDictionaryAndHaybale(HaystackRoutines.writer_cur_haystack, i)
-					}
-
 					// Update our bounding timestamps as well (for the trailer, and SHA512 catalogue file)
 					if time_first == 0 || HaystackRoutines.writer_cur_haystack.Haybale[i].time_first < time_first {
 						time_first = HaystackRoutines.writer_cur_haystack.Haybale[i].time_first
@@ -155,38 +185,21 @@ func diskWriter() {
 					}
 				}
 
-				/*
-
-					// Write Haybales (or whole file, for now)
-					data, _ = HaystackRoutines.writer_cur_haystack.Mem2Disk() // also returns error
-					_, err = HaystackRoutines.writer_cur_fp.Write(data)
-					if err != nil {
-						log.Printf("Error writing %d bytes to file '%s': %v", len(data), HaystackRoutines.diskwriter_iname, err)
-						break
-					}
-
-				*/
-
 				writeHaystackTrailer(time_first, time_last)
-
-			case diskwriter_close: // Close everything
-				// only requested by ShutDown(), uses a wait group
-				log.Printf("Haystack close/shutdown")
-				// ...
-
-				HaystackRoutines.diskwriter_wg.Done()
-				return // exit Go routine
-
 			}
 
-			// Check for timeout of haybale_wait_mintime
-			//case <-time.After(time.Duration(config.haybale_wait_mintime) * time.Second):
-			// timed out - check if we need to do stuff
+			HaystackRoutines.diskwriter_wg.Done()
+			return // exit Go routine
 
-			// Check for timeout of haybale_wait_maxtime
-			//case <-time.After(time.Duration(config.haybale_wait_maxtime) * time.Second):
-			// timed out - check if we need to do stuff
 		}
+
+		// Check for timeout of haybale_wait_mintime
+		//case <-time.After(time.Duration(config.haybale_wait_mintime) * time.Second):
+		// timed out - check if we need to do stuff
+
+		// Check for timeout of haybale_wait_maxtime
+		//case <-time.After(time.Duration(config.haybale_wait_maxtime) * time.Second):
+		// timed out - check if we need to do stuff
 	}
 }
 
@@ -195,6 +208,9 @@ func newHaystack() {
 	var new_hs Haystack
 
 	HaystackRoutines.writer_cur_haystack = &new_hs
+
+	// Add back-pointer from Dictionary. TODO: clean this up.
+	new_hs.Dict.HaystackPtr = &new_hs
 
 	// Set this Haystack's AES uuid to current configured one.
 	HaystackRoutines.writer_cur_haystack.aes_key_uuid = config.aes_keystore_current_uuid
@@ -206,6 +222,10 @@ func newHaystack() {
 }
 
 func newHaybale() {
+	// We need to lock here for just a tiny moment, otherwise InsertBunch() can bomb out
+	HaystackRoutines.newhaybale_mutex.Lock()
+	defer HaystackRoutines.newhaybale_mutex.Unlock()
+
 	// Create a new Haybale to which we can write
 	var new_hb Haybale
 
@@ -216,6 +236,7 @@ func newHaybale() {
 
 	// Add the new writer Haybale to the array of Haybales in the Haystack
 	HaystackRoutines.writer_cur_haystack.Haybale = append(HaystackRoutines.writer_cur_haystack.Haybale, HaystackRoutines.writer_cur_haybale)
+
 }
 
 func writeHaystackHeader() error {
@@ -239,27 +260,29 @@ func writeHaystackHeader() error {
 }
 
 func writeHaystackTrailer(time_first int64, time_last int64) error {
-	// Write Haystack file trailer
-	err := HaystackRoutines.writer_cur_haystack.mem2DiskFileTrailer(HaystackRoutines.writer_cur_haystack.last_dict_ofs, time_first, time_last)
-	if err != nil {
-		log.Printf("Error writing Haystack '%s' file trailer: %v", HaystackRoutines.diskwriter_iname, err)
-		return err
+	if HaystackRoutines.writer_cur_fp != nil {
+		// Write Haystack file trailer
+		err := HaystackRoutines.writer_cur_haystack.mem2DiskFileTrailer(HaystackRoutines.writer_cur_haystack.last_dict_ofs, time_first, time_last)
+		if err != nil {
+			log.Printf("Error writing Haystack '%s' file trailer: %v", HaystackRoutines.diskwriter_iname, err)
+			return err
+		}
+
+		HaystackRoutines.writer_cur_fp.Close() // Close output file
+		HaystackRoutines.writer_cur_fp = nil   // Set file handle to nil, so we remember
+		HaystackRoutines.writer_prev_ofs = 0
+
+		fname := fmt.Sprintf("%s/%d-%d.hs", config.datastore_dir, time_first, time_last)
+		if err := os.Rename(HaystackRoutines.diskwriter_iname, fname); err != nil {
+			log.Printf("Error renaming file '%s' to '%s': %v", HaystackRoutines.diskwriter_iname, fname, err)
+			return err
+		}
+
+		// Also create SHA512 file
+		CreateCatelogueFile(fname)
+
+		newHaystack()
 	}
-
-	HaystackRoutines.writer_cur_fp.Close() // Close output file
-	HaystackRoutines.writer_cur_fp = nil   // Set file handle to nil, so we remember
-	HaystackRoutines.writer_prev_ofs = 0
-
-	fname := fmt.Sprintf("%s/%d-%d.hs", config.datastore_dir, time_first, time_last)
-	if err := os.Rename(HaystackRoutines.diskwriter_iname, fname); err != nil {
-		log.Printf("Error renaming file '%s' to '%s': %v", HaystackRoutines.diskwriter_iname, fname, err)
-		return err
-	}
-
-	// Also create SHA512 file
-	CreateCatelogueFile(fname)
-
-	newHaystack()
 
 	return nil
 }

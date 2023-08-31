@@ -33,7 +33,8 @@ import (
 )
 
 // Helper function for InsertBunch() below
-// Inserts a new stalk and returns its own offset (haystalk_ofs_nil for error -> ignore)
+// Inserts a new stalk (KV entry) and returns its own offset
+// (haystalk_ofs_nil for error -> ignore)
 func (p *Haybale) insertStalk(d *Dictionary, k string, v string) uint32 {
 	var newstalk Haystalk
 
@@ -70,10 +71,14 @@ func (p *Haybale) insertStalk(d *Dictionary, k string, v string) uint32 {
 	}
 
 	// Update memsize on the fly, otherwise it'd be too slow
-	p.Memsize += 37 // Haystalk struct, approx
+	size := uint32(37) // Haystalk struct, approx
 	if newstalk.val.valtype == valtype_string {
-		p.Memsize += uint32(2 + len(*newstalk.val.stringval))
+		size += uint32(2 + len(*newstalk.val.stringval))
 	}
+	// Update size of current Haybale.
+	p.Memsize += size
+	// Also update Haystack size. TODO: this needs a better approach
+	d.HaystackPtr.memsize += size
 
 	// These two get filled later by the caller, but we don't leave them at 0
 	// because that is a valid offset.
@@ -85,7 +90,6 @@ func (p *Haybale) insertStalk(d *Dictionary, k string, v string) uint32 {
 	newstalk.self_ofs = pos // This is used during sorting
 	p.haystalk[pos] = &newstalk
 	p.num_haystalks++
-	p.is_sorted_immutable = false // This append makes the Haybale not sorted
 
 	return pos
 }
@@ -100,6 +104,10 @@ func (p *HaystackRoutinesType) InsertBunch(flatmap map[string]interface{}) {
 		// TODO: return some error condition
 		return
 	}
+
+	// We need to mutex here, otherwise Newhaybale() can make us bomb out
+	HaystackRoutines.newhaybale_mutex.Lock()
+	// Note that we don't defer but explicitly unlock later, so don't return without unlocking.
 
 	if _, ok := flatmap[Timestamp_key]; !ok {
 		return // Just ignore this bunch if there's no _timestamp field
@@ -162,8 +170,23 @@ func (p *HaystackRoutinesType) InsertBunch(flatmap map[string]interface{}) {
 	}
 
 	p.writer_cur_haybale.haystalk[first].next_ofs = prev // Put _timestamp field in front of the rest
+
+	// Do this before checking our limits and possible messenging to diskwriter thread
+	HaystackRoutines.newhaybale_mutex.Unlock()
+
+	// Check whether we want to flush, based on configured thresholds
+	if config.haystack_wait_maxsize > 0 &&
+		HaystackRoutines.writer_cur_haystack.memsize >= config.haystack_wait_maxsize {
+		p.FlushHaystack() // Send msg to diskwriter thread
+	} else {
+		if config.haybale_wait_minsize > 0 &&
+			HaystackRoutines.writer_cur_haybale.Memsize >= config.haybale_wait_minsize {
+			p.FlushHaybale() // Send msg to diskwriter thread
+		}
+	}
 }
 
+/*
 // Sort all haybales
 func (p *HaystackRoutinesType) SortAllBales() {
 	//log.Printf("Sorting all (%d) haybale(s)...", len(p.writer_cur_haystack.Haybale)) // DEBUG
@@ -177,6 +200,7 @@ func (p *HaystackRoutinesType) SortAllBales() {
 	//duration := time.Since(start)	// DEBUG
 	//log.Printf("Haybale sort duration: %v", duration)	// DEBUG
 }
+*/
 
 // Sort a Haybale, if needed. At this point we also de-dup strings
 func (p *Haybale) SortBale() {

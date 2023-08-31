@@ -116,38 +116,6 @@ func addKeyToData(buf *[]byte, dkey uint32, key *string) error {
 	return nil
 }
 
-// Assemble the disk structure for an entire Haystack
-// Return compressed/encrypted dataset, sha512 block, error
-func (p *Haystack) Mem2Disk() error {
-	// Set this Haystack's AES uuid to current configured one.
-	p.aes_key_uuid = config.aes_keystore_current_uuid
-
-	err := mem2DiskFileHeader(HaystackRoutines.writer_cur_fp)
-	if err != nil {
-		return err
-	}
-
-	// Now go through all the haybales
-	var time_first, time_last int64
-	for i := range p.Haybale {
-		mem2DiskDictionaryAndHaybale(p, i)
-
-		// Update our bounding timestamps as well (for the trailer)
-		if time_first == 0 || p.Haybale[i].time_first < time_first {
-			time_first = p.Haybale[i].time_first
-		}
-		if p.Haybale[i].time_last > time_last {
-			time_last = p.Haybale[i].time_last
-		}
-	}
-
-	if err := p.mem2DiskFileTrailer(HaystackRoutines.writer_prev_ofs, time_first, time_last); err != nil {
-		return err
-	}
-
-	return nil
-}
-
 // Assemble disk structure for the Haystack or SHA-512 header
 func mem2DiskFileHeader(fp *os.File) error {
 	content := make([]byte, 0, min_filesize)

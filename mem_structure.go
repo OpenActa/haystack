@@ -33,11 +33,11 @@ const (
 	haybale_wait_minsize_lower  = 0
 	haybale_wait_minsize_upper  = 256 * 1024 * 1024 // 256M
 	haybale_wait_mintime_lower  = 0
-	haybale_wait_mintime_upper  = 6 * 3600 // 6 hrs
+	haybale_wait_mintime_upper  = 6 * 60 * 60 // 6 hrs
 	haybale_wait_maxtime_lower  = 0
-	haybale_wait_maxtime_upper  = 6 * 3600 // 6 hrs
-	compression_level_lower     = 0        // lowest (0=off, 1=fast) compression
-	compression_level_upper     = 9        // highest (slower) compression
+	haybale_wait_maxtime_upper  = 6 * 60 * 60 // 6 hrs
+	compression_level_lower     = 0           // lowest (0=off, 1=fast) compression
+	compression_level_upper     = 9           // highest (slower) compression
 )
 
 type Haystack struct {

@@ -125,7 +125,7 @@ func main() {
 			action = true
 
 		case "-kv":
-			haystack.HaystackRoutines.SortAllBales()
+			//haystack.HaystackRoutines.SortAllBales()
 
 			kv_array := make(map[string]string)
 			if curarg+2 < len(os.Args) {
